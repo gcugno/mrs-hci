@@ -100,6 +100,7 @@ class MRS_HCI:
         
         #####################################################
         #INCLUDE WARNING IN CASE PSF, SCIENCE AND REFS HAVE DIFFERENT SIZES
+        print ('[WARNING]\t[Data sizes have not been verified]')
         #####################################################
             
     def PSFsub(self,
@@ -144,7 +145,11 @@ class MRS_HCI:
                 b_pa_lit):
         
         self.b_sep_lit = b_sep_lit
+        #####################################################
+        # TODO: number of FWHM variable!
         self.ap_pix = interp1d(FWHM_wvl, FWHM_miri*0.75)(self.wvl) / self.pixelsize
+        print ('[WARNING]\t[Apertures are defined to 0.75*FWHM and you can not do anything to change it at the moment.]')
+        #####################################################
         
         self.ap_pos = polar_to_cartesian(np.zeros((2*self.size+1,2*self.size+1)), sep = b_sep_lit/self.pixelsize, ang = MRS_PA[self.band[0]]) # Y, X
         shifts = np.loadtxt(self.output_dir + f'/Image_shifts/Shift_{self.band}.txt', skiprows=1)
@@ -164,7 +169,8 @@ class MRS_HCI:
                             size = self.ap_pix[int(len(self.ap_pix)/2)],
                             ignore = True)
 
-        print ('SNR = ', snr, ' for an aperture with radius ', self.ap_pix[int(len(self.ap_pix)/2)], ' pixels placed at ', self.ap_pos)
+        #print ('SNR = ', snr, ' for an aperture with radius ', self.ap_pix[int(len(self.ap_pix)/2)], ' pixels placed at ', self.ap_pos)
+        print ('[RESULT]\t[SNR = %.1f]'%snr)
         
         fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 6))
         ax.imshow(residuals_mean, origin="lower", cmap="RdBu_r", vmin=-np.max(residuals_mean), vmax=np.max(residuals_mean))
@@ -260,6 +266,8 @@ class MRS_HCI:
         fig.subplots_adjust(left=0.01, bottom=0.01, right=0.99, top=0.99, wspace=0.15, hspace=None)
         fig.savefig(self.output_dir + f'Img/Planet_removed_{self.band}.pdf')
         
+        print ('[WARNING]\t[Something to check here]')
+        print ('[WARNING]\t[The aperture for the spectral extraction is not at the exact position of GQ LupB]')
         print ('[DONE]\t\t[Contrast spectrum was calculated and exported]')
 
         #####################################################
@@ -267,6 +275,7 @@ class MRS_HCI:
         pt2 = np.vstack((self.wvl, self.contrast_spectrum, np.zeros_like(self.contrast_spectrum), np.zeros_like(self.contrast_spectrum)))
         pd_df2 = pd.DataFrame(pt2.T)
         pd_df2.to_csv(self.output_dir + f'/Extraction/Contrast_{self.band}.txt', index=False, header=('wvl [um]', 'Contrast [mag]', 'Bias [mag]', 'Sys error [mag]'), sep='\t')
+        print ('[WARNING]\t[No error is calculated at the moment. ]')
         #####################################################
 
 
@@ -276,13 +285,33 @@ class MRS_HCI:
         ## TODO: use the one coming from the specific module (still to be written)
         self.offset_mean = np.zeros_like(self.contrast_spectrum)
         self.offset_std = np.zeros_like(self.contrast_spectrum)
+        print ('[WARNING]\t[No error is calculated at the moment]')
         #####################################################
         
+        #####################################################
+        ## TODO: evaluate how to estimate errorbar. Right now only one side is considered
         psf_flux = pickle.load(open("/Users/gcugno/Science/JWST/MRS/GQLup/GQLUP_MIRI/spectrum_1536_obs22", 'rb'))[self.band]
         flux = psf_flux * 10**(-(self.contrast_spectrum-self.offset_mean)/2.5)*1000
         flux_err_up = psf_flux * 10**(-(self.contrast_spectrum - self.offset_mean - self.offset_std)/2.5)*1000-flux
+        print ('[WARNING]\t[The errors are currently estimated in a shady way]')
+        print ('[WARNING]\t[The path to the calibration spectrum is hardcoded]')
+        #####################################################
 
         pt2 = np.vstack((self.wvl, flux, flux_err_up))
         pd_df2 = pd.DataFrame(pt2.T)
         pd_df2.to_csv(self.output_dir + f'/Extraction/Flux_{self.band}.txt', index=False, header=('wvl [um]', 'Flux [mJy]', 'Flux err [mJy]'), sep='\t')
         print ('[DONE]\t\t[Planet spectrum was calculated and exported]')
+        
+        
+        fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(9, 4))
+        ax.plot(self.wvl, flux, color='dodgerblue', alpha=0.8, label=f'Flux in {self.band}')
+        ax.fill_between(self.wvl, flux-flux_err_up, flux+flux_err_up, color='lightblue', alpha=0.3)
+        ax.set_xlabel("$\lambda$ [$\mu m$]", size=18)
+        ax.set_ylabel("Flux [mJy]", size=18)
+        ax.tick_params(labelsize=15)
+        ax.set_ylim(np.median(flux)-10*np.std(flux),np.median(flux)+10*np.std(flux))
+        ax.set_xlim(self.wvl[0]-0.01, self.wvl[-1]+0.01)
+        ax.legend(prop={'size':15})
+
+        fig.subplots_adjust(left=0.11, bottom=0.16, right=0.99, top=0.97, wspace=0.15, hspace=None)
+        fig.savefig(self.output_dir + f'/Img/Flux_{self.band}.pdf')
