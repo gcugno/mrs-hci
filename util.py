@@ -8,6 +8,10 @@ from astropy.modeling import models, fitting
 from sklearn.decomposition import PCA
 import pandas as pd
 
+import sys
+sys.path.append('/Users/gcugno/Tools/PynPoint')
+from pynpoint.util.analysis import fake_planet, merit_function
+from pynpoint.util.image import polar_to_cartesian
 
 def prep_dict_cube(folder, name):
     mrs_data = {}
@@ -201,3 +205,42 @@ def crop_psf(psf_cube, data_hdr, band, out_dir, size):
     ax.text(0, 2, "PSF", size=10, color="black")
     fig.savefig(out_dir + f'/Img/PSF_{band}.pdf')
     return psf
+
+
+def _objective(arg,
+               sep_ang,
+               image,
+               refs,
+               psf_im,
+               ap_pix_k,
+               pca_number,
+               var_noise,
+               mask
+              ):
+    mag=arg[0]
+
+
+    ap_pos = polar_to_cartesian(image, sep = sep_ang[0], ang = sep_ang[1])
+    aperture = (round(ap_pos[0]), round(ap_pos[1]), ap_pix_k)
+    
+    # Inject the negative artifical planet at the position and contrast that is tested
+    fake = fake_planet(images=image,
+                       psf=psf_im,
+                       parang=np.array([0]),
+                       position=(sep_ang[0], sep_ang[1]),
+                       magnitude=mag,
+                       psf_scaling=-1)
+                                                               
+    
+    _, res = apply_PCA(pca_number, fake[0]*mask, refs*mask)
+    
+    # Calculate the chi-square for the tested position and contrast
+    chi_sq = merit_function(residuals=res,
+                                    merit='gaussian',
+                                    aperture=aperture,
+                                    sigma=0,
+                                    var_noise=var_noise)
+
+
+
+    return chi_sq
