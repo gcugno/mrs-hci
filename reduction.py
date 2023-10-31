@@ -4,6 +4,8 @@ from matplotlib import pyplot as plt
 from scipy.interpolate import interp1d
 from scipy.optimize import minimize
 from tqdm import tqdm
+import pandas as pd
+import pickle
 
 
 from util import prep_dict_cube, prep_wvl_cube, find_star, apply_PCA, crop_science, crop_refs, crop_psf, _objective
@@ -20,12 +22,10 @@ class MRS_HCI:
                  output_dir,
                  science_path,
                  band = "1A",
-                 verbose = True,# pixels
                 ):
 
         self.output_dir = output_dir
         self.band = band
-        self.verbose = verbose
                 
         
         if not os.path.isdir(output_dir+'/Image_shifts'):
@@ -36,6 +36,8 @@ class MRS_HCI:
             os.mkdir(output_dir+'/Manipulated_images')
         if not os.path.isdir(output_dir+'/Residuals'):
             os.mkdir(output_dir+'/Residuals')
+        if not os.path.isdir(output_dir+'/Extraction'):
+            os.mkdir(output_dir+'/Extraction')
             
             
         self.data_import = prep_dict_cube(science_path, 'SCIENCE')[self.band]
@@ -79,8 +81,7 @@ class MRS_HCI:
         self.science, D0 = crop_science(self.data_import, self.data_hdr, self.band, self.output_dir, size)
         self.refs_dict = crop_refs(self.refs_list, self.data_hdr, self.band, D0, self.output_dir, size)
         self.psf = crop_psf(self.psf_import, self.data_hdr, self.band, self.output_dir, size)
-        if self.verbose:
-            print ('[DONE]\t\t[All the data have been cropped]')
+        print ('[DONE]\t\t[All the data have been cropped]')
 
             
         #for band in self.bands:
@@ -95,8 +96,8 @@ class MRS_HCI:
         hdul = fits.HDUList(fits.PrimaryHDU())
         hdul.append(fits.ImageHDU(self.psf, name="PSF"))
         hdul.writeto(self.output_dir + f'/Manipulated_images/PSF_{self.band}.fits', overwrite=True)
-        if self.verbose:
-            print ('[DONE]\t\t[All the data saved in fits files]')
+        print ('[DONE]\t\t[All the data saved in fits files]')
+        
         #####################################################
         #INCLUDE WARNING IN CASE PSF, SCIENCE AND REFS HAVE DIFFERENT SIZES
         #####################################################
@@ -258,3 +259,30 @@ class MRS_HCI:
 
         fig.subplots_adjust(left=0.01, bottom=0.01, right=0.99, top=0.99, wspace=0.15, hspace=None)
         fig.savefig(self.output_dir + f'Img/Planet_removed_{self.band}.pdf')
+        
+        print ('[DONE]\t\t[Contrast spectrum was calculated and exported]')
+
+        #####################################################
+        ## TODO: Move this after the calculation of the error took place as well
+        pt2 = np.vstack((self.wvl, self.contrast_spectrum, np.zeros_like(self.contrast_spectrum), np.zeros_like(self.contrast_spectrum)))
+        pd_df2 = pd.DataFrame(pt2.T)
+        pd_df2.to_csv(self.output_dir + f'/Extraction/Contrast_{self.band}.txt', index=False, header=('wvl [um]', 'Contrast [mag]', 'Bias [mag]', 'Sys error [mag]'), sep='\t')
+        #####################################################
+
+
+    def Extract_spectrum(self):
+
+        #####################################################
+        ## TODO: use the one coming from the specific module (still to be written)
+        self.offset_mean = np.zeros_like(self.contrast_spectrum)
+        self.offset_std = np.zeros_like(self.contrast_spectrum)
+        #####################################################
+        
+        psf_flux = pickle.load(open("/Users/gcugno/Science/JWST/MRS/GQLup/GQLUP_MIRI/spectrum_1536_obs22", 'rb'))[self.band]
+        flux = psf_flux * 10**(-(self.contrast_spectrum-self.offset_mean)/2.5)*1000
+        flux_err_up = psf_flux * 10**(-(self.contrast_spectrum - self.offset_mean - self.offset_std)/2.5)*1000-flux
+
+        pt2 = np.vstack((self.wvl, flux, flux_err_up))
+        pd_df2 = pd.DataFrame(pt2.T)
+        pd_df2.to_csv(self.output_dir + f'/Extraction/Flux_{self.band}.txt', index=False, header=('wvl [um]', 'Flux [mJy]', 'Flux err [mJy]'), sep='\t')
+        print ('[DONE]\t\t[Planet spectrum was calculated and exported]')

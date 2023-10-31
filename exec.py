@@ -14,3 +14,5 @@ gqlup_red.SNR(b_sep_lit = 0.708,
         b_pa_lit = 279)
 
 gqlup_red.Contrast_spectrum()
+
+gqlup_red.Extract_spectrum()
