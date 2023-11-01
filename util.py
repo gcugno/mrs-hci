@@ -162,19 +162,19 @@ def crop_refs(refs_list, refs_names, data_hdr, band, D0, out_dir, size):
             ref_i_centered.append(rshift[round(dy0)-size:round(dy0)+size+1, round(dx0)-size:round(dx0)+size+1])
         refs.append(ref_i_centered)
     # Save cropped references in a new dictionary
-    print (np.shape(np.array(refs)))
     refs_dict = np.array(refs)*(data_hdr["PIXAR_SR"]*1e6)
 
     # Plot the reference positions
-    fig, ax = plt.subplots(ncols=5, nrows=3, figsize=(10, 6))
+    fig, ax = plt.subplots(ncols=6, nrows=3, figsize=(10, 6))
     ax = np.array(ax).flatten()
 
     #for i, ref in enumerate(refs_list):
     i=0
-    while i<15:
+    v = np.max(np.nanmean(refs_dict[0], axis=0))
+    while i<len(refs_names):
         val = 2e-2
         im = np.nanmean(refs_dict[i], axis=0)
-        ax[i].imshow(im, origin='lower', vmin=-np.max(im)/1.5, vmax=np.max(im)/1.5, cmap='RdBu_r')
+        ax[i].imshow(im, origin='lower', vmin=-v, vmax=v, cmap='RdBu_r')
         ax[i].set_xticks([])
         ax[i].set_yticks([])
         ax[i].text(0, 2, refs_names[i], size=10, color="black")
@@ -220,7 +220,8 @@ def _objective(arg,
                ap_pix_k,
                pca_number,
                var_noise,
-               mask
+               mask,
+               verb=False,
               ):
     mag=arg[0]
 
@@ -245,7 +246,6 @@ def _objective(arg,
                                     aperture=aperture,
                                     sigma=0,
                                     var_noise=var_noise)
-
 
 
     return chi_sq
