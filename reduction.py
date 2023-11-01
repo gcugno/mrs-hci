@@ -21,6 +21,9 @@ class MRS_HCI:
     def __init__(self,
                  output_dir,
                  science_path,
+                 refs_path,
+                 refs_names,
+                 psf_name,
                  band = "1A",
                 ):
 
@@ -44,29 +47,17 @@ class MRS_HCI:
         self.wvl, self.data_hdr = prep_wvl_cube(science_path)
         self.wvl = self.wvl[self.band]
         self.data_hdr = self.data_hdr[self.band]
+        self.refs_names = refs_names
         
         self.pixelsize= self.data_hdr["CDELT1"]*3600
         
-                #####################################################
-        ## THIS SHOULD BE automated!!
-        add = 'MRS_REF_PSF_processed_270823/'
-        ref_1538_1 = prep_dict_cube("/Users/gcugno/Science/JWST/MRS/GQLup/GQLup_MIRI/"+add+"1538/cubes_obs1/", 'PID1538_obs1')[self.band]
-        ref_1538_2 = prep_dict_cube("/Users/gcugno/Science/JWST/MRS/GQLup/GQLup_MIRI/"+add+"1538/cubes_obs2/", 'PID1538_obs2')[self.band]
-        ref_1538_3 = prep_dict_cube("/Users/gcugno/Science/JWST/MRS/GQLup/GQLup_MIRI/"+add+"1538/cubes_obs3/", 'PID1538_obs3')[self.band]
-        ref_1536_22 = prep_dict_cube("/Users/gcugno/Science/JWST/MRS/GQLup/GQLup_MIRI/"+add+"1536/cubes_obs22/", 'PID1536_obs22')[self.band]
-        ref_1536_23 = prep_dict_cube("/Users/gcugno/Science/JWST/MRS/GQLup/GQLup_MIRI/"+add+"1536/cubes_obs23/", 'PID1536_obs23')[self.band]
-        ref_1536_24 = prep_dict_cube("/Users/gcugno/Science/JWST/MRS/GQLup/GQLup_MIRI/"+add+"1536/cubes_obs24/", 'PID1536_obs24')[self.band]
-        ref_1524_17 = prep_dict_cube("/Users/gcugno/Science/JWST/MRS/GQLup/GQLup_MIRI/"+add+"1524/cubes_obs17/", 'PID1524_obs17')[self.band]
-        ref_1050_3 = prep_dict_cube("/Users/gcugno/Science/JWST/MRS/GQLup/GQLup_MIRI/"+add+"1050/cubes_obs3/", 'PID1050_obs3')[self.band]
-        ref_1050_9 = prep_dict_cube("/Users/gcugno/Science/JWST/MRS/GQLup/GQLup_MIRI/"+add+"1050/cubes_obs9/", 'PID1050_obs9')[self.band]
-        ref_RYLup = prep_dict_cube("/Users/gcugno/Science/JWST/MRS/GQLup/GQLup_MIRI/VRYLUP/cubes/", 'RYLup')[self.band]
         
-        self.refs_list = [ref_1538_1, ref_1538_2, ref_1538_3, ref_1536_22, ref_1536_23, ref_1536_24, ref_1524_17, ref_1050_3, ref_1050_9, ref_RYLup]
+        self.refs_list = []
+        for ref in refs_names:
+            self.refs_list.append(prep_dict_cube(refs_path+ref+'/', ref)[self.band])
         
-        self.psf_import = prep_dict_cube("/Users/gcugno/Science/JWST/MRS/GQLup/GQLup_MIRI/"+add+"1536/cubes_obs22/", 'PSF')[self.band]
+        self.psf_import = prep_dict_cube(refs_path+psf_name+'/', 'PSF')[self.band]
         
-        print ('[WARNING]\t[The path to the references is hardcoded]')
-        #####################################################
         
         return
     
@@ -79,7 +70,7 @@ class MRS_HCI:
         
         ## CROPPING the cubes
         self.science, D0 = crop_science(self.data_import, self.data_hdr, self.band, self.output_dir, size)
-        self.refs_dict = crop_refs(self.refs_list, self.data_hdr, self.band, D0, self.output_dir, size)
+        self.refs_dict = crop_refs(self.refs_list, self.refs_names, self.data_hdr, self.band, D0, self.output_dir, size)
         self.psf = crop_psf(self.psf_import, self.data_hdr, self.band, self.output_dir, size)
         print ('[DONE]\t\t[All the data have been cropped]')
 

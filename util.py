@@ -142,11 +142,11 @@ def crop_science(data, data_hdr, band, out_dir, size):
     pd_df2.to_csv(out_dir + f'/Image_shifts/Shift_{band}.txt', index=False, header=('y [pix]', 'x [pix]'), sep='\t')
     return science, (dx0,dy0)
 
-def crop_refs(refs_list, data_hdr, band, D0, out_dir, size):
+def crop_refs(refs_list, refs_names, data_hdr, band, D0, out_dir, size):
     dx0,dy0 = D0
     refs = []
     # Loop over the references
-    for ref in refs_list:
+    for i, ref in enumerate(refs_list):
         # Take data of the right band, remove nans and collapse to 2D
         r = ref
         r[np.isnan(r)] = 0.
@@ -162,20 +162,25 @@ def crop_refs(refs_list, data_hdr, band, D0, out_dir, size):
             ref_i_centered.append(rshift[round(dy0)-size:round(dy0)+size+1, round(dx0)-size:round(dx0)+size+1])
         refs.append(ref_i_centered)
     # Save cropped references in a new dictionary
+    print (np.shape(np.array(refs)))
     refs_dict = np.array(refs)*(data_hdr["PIXAR_SR"]*1e6)
 
     # Plot the reference positions
-    fig, ax = plt.subplots(ncols=5, nrows=2, figsize=(10, 5))
+    fig, ax = plt.subplots(ncols=5, nrows=3, figsize=(10, 6))
     ax = np.array(ax).flatten()
 
-    for i, ref in enumerate(refs_list):
+    #for i, ref in enumerate(refs_list):
+    i=0
+    while i<15:
         val = 2e-2
-    
-        ax[i].imshow(np.nanmean(refs_dict[i], axis=0), origin='lower', vmin=-np.max(np.nanmean(refs_dict[i], axis=0))/2, vmax=np.max(np.nanmean(refs_dict[i], axis=0))/2, cmap='RdBu_r')
+        im = np.nanmean(refs_dict[i], axis=0)
+        ax[i].imshow(im, origin='lower', vmin=-np.max(im)/1.5, vmax=np.max(im)/1.5, cmap='RdBu_r')
         ax[i].set_xticks([])
         ax[i].set_yticks([])
-        #ax[i].text(0, 2, ref["name"], size=10, color="black")
-        
+        ax[i].text(0, 2, refs_names[i], size=10, color="black")
+        i += 1
+
+    fig.subplots_adjust(left=0.01, bottom=0.01, right=0.99, top=0.99, wspace=0.05, hspace=None)
     fig.savefig(out_dir + f'/Img/Refs_{band}.pdf')
         
     return refs_dict
