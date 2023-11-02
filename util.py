@@ -249,3 +249,38 @@ def _objective(arg,
 
 
     return chi_sq
+
+
+
+
+
+def remove_outliers(wavelength, spectrum, spectrum_err, threshold=3):
+    """
+    Remove outliers from wavelength and spectrum arrays using the Z-score method.
+
+    Parameters:
+    - wavelength: List or NumPy array of wavelength values.
+    - spectrum: List or NumPy array of corresponding spectrum values.
+    - threshold: Z-score threshold for identifying outliers. Default is 3.
+
+    Returns:
+    - Two lists (wavelength and spectrum) with outliers removed.
+    """
+    wavelength = np.array(wavelength)
+    spectrum = np.array(spectrum)
+    
+    # Calculate the median of the spectrum values
+    median_spectrum = np.median(spectrum)
+    
+    # Calculate the Median Absolute Deviation (MAD)
+    mad = np.median(np.abs(spectrum - median_spectrum))
+
+    # Calculate Z-scores for the spectrum values
+    z_scores = np.abs((spectrum - median_spectrum) / (mad * 1.4826))
+
+    # Filter both wavelength and spectrum arrays based on the threshold
+    filtered_wavelength = wavelength[z_scores < threshold]
+    filtered_spectrum = spectrum[z_scores < threshold]
+    filtered_spectrum_err = spectrum_err[z_scores < threshold]
+
+    return filtered_wavelength, filtered_spectrum, filtered_spectrum_err

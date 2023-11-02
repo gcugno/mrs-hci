@@ -8,7 +8,7 @@ import pandas as pd
 import pickle
 
 
-from util import prep_dict_cube, prep_wvl_cube, find_star, apply_PCA, crop_science, crop_refs, crop_psf, _objective
+from util import prep_dict_cube, prep_wvl_cube, find_star, apply_PCA, crop_science, crop_refs, crop_psf, _objective, remove_outliers
 from fixed_values import *
 
 import sys
@@ -274,9 +274,9 @@ class MRS_HCI:
         self.offset_mean = []
         self.offset_std = []
         
-        j=0
-        fig, ax = plt.subplots(ncols=3, nrows=8, figsize=(5, 15))
-        ax = np.array(ax).flatten()
+        #j=0
+        #fig, ax = plt.subplots(ncols=3, nrows=8, figsize=(5, 15))
+        #ax = np.array(ax).flatten()
             
         for k in tqdm(range(len(self.science))):
             _, res_no_planet_k = apply_PCA(self.pca_number, self.science_no_planet[k][0]*self.mask, self.refs_dict[:,k,:,:]*self.mask)
@@ -329,8 +329,8 @@ class MRS_HCI:
             
             self.offset_mean.append(np.mean(offsets_k))
             self.offset_std.append(np.std(offsets_k))
-            fig.subplots_adjust(left=0.01, bottom=0.01, right=0.99, top=0.99, wspace=0.15, hspace=None)
-            fig.savefig(self.output_dir + f'/Img/Offsets_{self.band}.pdf')
+            #fig.subplots_adjust(left=0.01, bottom=0.01, right=0.99, top=0.99, wspace=0.15, hspace=None)
+            #fig.savefig(self.output_dir + f'/Img/Offsets_{self.band}.pdf')
             
 
         #####################################################
@@ -344,7 +344,8 @@ class MRS_HCI:
 
 
 
-    def Extract_spectrum(self):
+    def Extract_spectrum(self,
+                        outlier_thres = 5):
 
         #####################################################
         ## TODO: use the one coming from the specific module (still to be written)
@@ -353,16 +354,23 @@ class MRS_HCI:
         #print ('[WARNING]\t[No error is calculated at the moment]')
         #####################################################
         
+        self.offset_mean = np.array(self.offset_mean)
+        self.offset_std = np.array(self.offset_std)
+        self.contrast_spectrum = np.array(self.contrast_spectrum)
+        
         #####################################################
         ## TODO: evaluate how to estimate errorbar. Right now only one side is considered
         psf_flux = pickle.load(open("/Users/gcugno/Science/JWST/MRS/GQLup/Raw_data/spectrum_1536_obs22", 'rb'))[self.band]
+        if self.band == "2C":
+            psf_flux = psf_flux[:1293]
         flux = psf_flux * 10**(-(self.contrast_spectrum-self.offset_mean)/2.5)*1000
         flux_err_up = psf_flux * 10**(-(self.contrast_spectrum - self.offset_mean - self.offset_std)/2.5)*1000-flux
         flux_err_down = -psf_flux * 10**(-(self.contrast_spectrum - self.offset_mean + self.offset_std)/2.5)*1000+flux
-        flux_err = np.min((flux_err_up, flux_err_down))
-        print ('[WARNING]\t[The errors are currently estimated in a shady way]')
+        flux_err = np.minimum(flux_err_up, flux_err_down)
+        print (np.shape(flux_err_up), np.shape(flux_err_down), np.shape(flux_err))
         print ('[WARNING]\t[The path to the calibration spectrum is hardcoded]')
         #####################################################
+        
 
         pt2 = np.vstack((self.wvl, flux, flux_err))
         pd_df2 = pd.DataFrame(pt2.T)
@@ -370,13 +378,25 @@ class MRS_HCI:
         print ('[DONE]\t\t[Planet spectrum was calculated and exported]')
         
         
+        wvl_clean, flux_clean, flux_err_clean = remove_outliers(self.wvl, flux, flux_err , outlier_thres)
+        
+        
+        pt2 = np.vstack((wvl_clean, flux_clean, flux_err_clean))
+        pd_df2 = pd.DataFrame(pt2.T)
+        pd_df2.to_csv(self.output_dir + f'/Extraction/Flux_clean_{self.band}.txt', index=False, header=('wvl [um]', 'Flux [mJy]', 'Flux err [mJy]'), sep='\t')
+        print ('[DONE]\t\t[Planet spectrum was calculated and exported]')
+        
+        
         fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(9, 4))
         ax.plot(self.wvl, flux, color='dodgerblue', alpha=0.8, label=f'Flux in {self.band}')
         ax.fill_between(self.wvl, flux-flux_err, flux+flux_err, color='lightblue', alpha=0.3)
+        ax.plot(wvl_clean, flux_clean, color='k', lw=0.5)
+        ax.fill_between(wvl_clean, flux_clean-flux_err_clean, flux_clean+flux_err_clean, color='silver', alpha=0.3)
+
         ax.set_xlabel("$\lambda$ [$\mu m$]", size=18)
         ax.set_ylabel("Flux [mJy]", size=18)
         ax.tick_params(labelsize=15)
-        ax.set_ylim(np.median(flux)-10*np.std(flux),np.median(flux)+10*np.std(flux))
+        ax.set_ylim(np.median(flux_clean)-10*np.std(flux_clean),np.median(flux_clean)+10*np.std(flux_clean))
         ax.set_xlim(self.wvl[0]-0.01, self.wvl[-1]+0.01)
         ax.legend(prop={'size':15})
 
