@@ -225,7 +225,6 @@ def _objective(arg,
               ):
     mag=arg[0]
 
-
     ap_pos = polar_to_cartesian(image, sep = sep_ang[0], ang = sep_ang[1])
     aperture = (round(ap_pos[0]), round(ap_pos[1]), ap_pix_k)
     
@@ -237,16 +236,17 @@ def _objective(arg,
                        magnitude=mag,
                        psf_scaling=-1)
                                                                
-    
-    _, res = apply_PCA(pca_number, fake[0]*mask, refs*mask)
+    if pca_number is not None:
+        _, res = apply_PCA(pca_number, fake[0]*mask, refs*mask)
+    else:
+        res = (fake[0]*mask-refs*mask)
     
     # Calculate the chi-square for the tested position and contrast
     chi_sq = merit_function(residuals=res,
-                                    merit='gaussian',
+                                    merit='poisson',
                                     aperture=aperture,
                                     sigma=0,
                                     var_noise=var_noise)
-
 
     return chi_sq
 
