@@ -5,6 +5,7 @@ from scipy.interpolate import interp1d
 from scipy.optimize import minimize
 from tqdm import tqdm
 import pandas as pd
+import astropy.units as u
 import pickle
 
 
@@ -50,6 +51,7 @@ class MRS_HCI:
         self.refs_names = refs_names
         
         self.pixelsize= self.data_hdr["CDELT1"]*3600
+        print ('Pixelscale = ', self.pixelsize)
         
         
         self.refs_list = []
@@ -57,6 +59,7 @@ class MRS_HCI:
             self.refs_list.append(prep_dict_cube(refs_path+ref+'/', ref)[self.band])
         
         self.psf_import = prep_dict_cube(refs_path+psf_name+'/', 'PSF')[self.band]
+        #self.psf_import = prep_dict_cube(refs_path+'../GQLUP_MIRI_old!!_DELETE/1538_1/', 'PSF')[self.band]
         
         
         return
@@ -133,19 +136,17 @@ class MRS_HCI:
             
     def SNR(self,
                 b_sep_lit,
-                b_pa_lit):
+                b_pa_lit,
+                r_in_FWHM=0.5):
         
         self.b_sep_lit = b_sep_lit
-        #####################################################
-        # TODO: number of FWHM variable!
-        self.ap_pix = interp1d(FWHM_wvl, FWHM_miri*0.75)(self.wvl) / self.pixelsize
-        print ('[WARNING]\t[Apertures are defined to 0.75*FWHM and you can not do anything to change it at the moment.]')
-        #####################################################
+        self.ap_pix = interp1d(FWHM_wvl, r_in_FWHM * FWHM_miri)(self.wvl) / self.pixelsize
         
         self.ap_pos = polar_to_cartesian(np.zeros((2*self.size+1,2*self.size+1)), sep = b_sep_lit/self.pixelsize, ang = MRS_PA[self.band[0]]) # Y, X
         shifts = np.loadtxt(self.output_dir + f'/Image_shifts/Shift_{self.band}.txt', skiprows=1)
         self.ap_pos += shifts
         print ('[WARNING]\t[The SNR aperture is hard coded on the location if GQ Lup B]')
+        print ('Aperture position = ', self.ap_pos)
         
         residuals_mean = np.nanmedian(self.residuals, axis=0)
         self.vval = np.max(residuals_mean)
@@ -211,7 +212,7 @@ class MRS_HCI:
         self.science_no_planet = []
         j=0
         for k in tqdm(range(len(self.science))):
-            selected = select_annulus(self.residuals[k], self.b_sep_from_center-2*self.ap_pix[k], self.b_sep_from_center+2*self.ap_pix[k], (self.ap_pos[0], self.ap_pos[1]), 2*self.ap_pix[k])
+            selected = select_annulus(self.residuals[k], self.b_sep_from_center-3*self.ap_pix[k], self.b_sep_from_center+3*self.ap_pix[k], (self.ap_pos[0], self.ap_pos[1]), 3*self.ap_pix[k])
             var_noise = float(np.var(selected))
 
 
@@ -251,7 +252,6 @@ class MRS_HCI:
                 ax[j+1].plot(self.ap_pos[1],self.ap_pos[0],'o',color='k', markersize=1)
                 ax[j+1].set_xticks([])
                 ax[j+1].set_yticks([])
-                #ax[j+1].text(0, 2, 'Fake planet', size=10, color="black")
                 ax[j+1].text(0, 2, 'mag = %.1f'%min_result.x[0], size=10, color="black")
                 j+=2
 
@@ -280,7 +280,8 @@ class MRS_HCI:
             
         for k in tqdm(range(len(self.science))):
             _, res_no_planet_k = apply_PCA(self.pca_number, self.science_no_planet[k][0]*self.mask, self.refs_dict[:,k,:,:]*self.mask)
-            selected = select_annulus(res_no_planet_k, self.b_sep_from_center-2*self.ap_pix[k], self.b_sep_from_center+2*self.ap_pix[k], (self.ap_pos[0], self.ap_pos[1]), 2*self.ap_pix[k])
+            selected = select_annulus(res_no_planet_k, self.b_sep_from_center-3*self.ap_pix[k], self.b_sep_from_center+3*self.ap_pix[k], (self.ap_pos[0], self.ap_pos[1]), 3*self.ap_pix[k])
+            #selected = select_annulus(res_no_planet_k, self.b_sep_from_center-3*self.ap_pix[k], self.b_sep_from_center+3*self.ap_pix[k])[:-10]
             var_noise = float(np.var(selected))
 
         
@@ -345,22 +346,15 @@ class MRS_HCI:
 
 
     def Extract_spectrum(self,
+                        spectrum_path,
                         outlier_thres = 5):
 
-        #####################################################
-        ## TODO: use the one coming from the specific module (still to be written)
-        #self.offset_mean = np.zeros_like(self.contrast_spectrum)
-        #self.offset_std = np.zeros_like(self.contrast_spectrum)
-        #print ('[WARNING]\t[No error is calculated at the moment]')
-        #####################################################
         
         self.offset_mean = np.array(self.offset_mean)
         self.offset_std = np.array(self.offset_std)
         self.contrast_spectrum = np.array(self.contrast_spectrum)
         
-        #####################################################
-        ## TODO: evaluate how to estimate errorbar. Right now only one side is considered
-        psf_flux = pickle.load(open("/Users/gcugno/Science/JWST/MRS/GQLup/Raw_data/spectrum_1536_obs22", 'rb'))[self.band]
+        psf_flux = pickle.load(open(spectrum_path, 'rb'))[self.band]
         if self.band == "2C":
             psf_flux = psf_flux[:1293]
         flux = psf_flux * 10**(-(self.contrast_spectrum-self.offset_mean)/2.5)*1000
@@ -368,19 +362,17 @@ class MRS_HCI:
         flux_err_down = -psf_flux * 10**(-(self.contrast_spectrum - self.offset_mean + self.offset_std)/2.5)*1000+flux
         flux_err = np.minimum(flux_err_up, flux_err_down)
         print (np.shape(flux_err_up), np.shape(flux_err_down), np.shape(flux_err))
-        print ('[WARNING]\t[The path to the calibration spectrum is hardcoded]')
-        #####################################################
         
-
+        # Export the sepctra
         pt2 = np.vstack((self.wvl, flux, flux_err))
         pd_df2 = pd.DataFrame(pt2.T)
         pd_df2.to_csv(self.output_dir + f'/Extraction/Flux_{self.band}.txt', index=False, header=('wvl [um]', 'Flux [mJy]', 'Flux err [mJy]'), sep='\t')
-        print ('[DONE]\t\t[Planet spectrum was calculated and exported]')
         
         
+        # Call function that removes outliers
         wvl_clean, flux_clean, flux_err_clean = remove_outliers(self.wvl, flux, flux_err , outlier_thres)
         
-        
+        # Export the sepctra without outliers
         pt2 = np.vstack((wvl_clean, flux_clean, flux_err_clean))
         pd_df2 = pd.DataFrame(pt2.T)
         pd_df2.to_csv(self.output_dir + f'/Extraction/Flux_clean_{self.band}.txt', index=False, header=('wvl [um]', 'Flux [mJy]', 'Flux err [mJy]'), sep='\t')
@@ -402,3 +394,12 @@ class MRS_HCI:
 
         fig.subplots_adjust(left=0.11, bottom=0.16, right=0.99, top=0.97, wspace=0.15, hspace=None)
         fig.savefig(self.output_dir + f'/Img/Flux_{self.band}.pdf')
+
+
+
+        flux_cgs = (flux_clean*u.mJy).to(u.W/u.m**2/u.micron, equivalencies=u.spectral_density(wvl_clean*u.micron)).value
+        flux_err_cgs = (flux_err_clean*u.mJy).to(u.W/u.m**2/u.micron, equivalencies=u.spectral_density(wvl_clean*u.micron)).value
+        
+        pt2 = np.vstack((wvl_clean, flux_cgs, flux_err_cgs))
+        pd_df2 = pd.DataFrame(pt2.T)
+        pd_df2.to_csv(self.output_dir + f'/Extraction/Flux_cgs_{self.band}.txt', index=False, header=('wvl [um]', 'Flux [W m^-2 um^-1]', 'Flux err [W m^-2 um^-1]'), sep='\t')
