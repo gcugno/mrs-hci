@@ -51,7 +51,7 @@ class MRS_HCI:
         self.refs_names = refs_names
         
         self.pixelsize= self.data_hdr["CDELT1"]*3600
-        print ('Pixelscale = ', self.pixelsize)
+        print ('[INFO]\t\t[Pixelscale = ', self.pixelsize,']')
         
         
         self.refs_list = []
@@ -60,6 +60,11 @@ class MRS_HCI:
         
         self.psf_import = prep_dict_cube(refs_path+psf_name+'/', 'PSF')[self.band]
         #self.psf_import = prep_dict_cube(refs_path+'../GQLUP_MIRI_old!!_DELETE/1538_1/', 'PSF')[self.band]
+        
+        #####################################################
+        # WHAT IS GOING ON WITH 2C AND THE DIMENSION?
+        print ('[WARNING]\t[Verify dimensions in channel 2C]')
+        #####################################################
         
         
         return
@@ -92,10 +97,12 @@ class MRS_HCI:
         hdul.writeto(self.output_dir + f'/Manipulated_images/PSF_{self.band}.fits', overwrite=True)
         print ('[DONE]\t\t[All the data saved in fits files]')
         
-        #####################################################
-        #INCLUDE WARNING IN CASE PSF, SCIENCE AND REFS HAVE DIFFERENT SIZES
-        print ('[WARNING]\t[Data sizes have not been verified]')
-        #####################################################
+        if np.shape(self.science) != np.shape(self.psf) or np.shape(self.science) != np.shape(self.refs_dict)[1:]:
+            print ('[ERROR]\t\t[Shape of science = ', np.shape(self.science),']')
+            print ('[ERROR]\t\t[Shape of PSF = ', np.shape(self.psf),']')
+            print ('[ERROR]\t\t[Shape of references = ', np.shape(self.refs_dict),']')
+            raise ValueError('[ERROR]\t\t[Arrays have different sizes]')
+        
             
     def PSFsub(self,
                 pca_number,
@@ -117,7 +124,6 @@ class MRS_HCI:
         hdul.append(fits.ImageHDU(self.residuals,header=self.data_hdr, name="RES"))
         hdul.writeto(self.output_dir + f'/Residuals/Residuals_{self.band}.fits', overwrite=True)
             
-        #val = {"1A":0.0006, "1B":1e-3, "1C":4e-4, "2A":7e-4, "2B":7e-4, "2C":6e-4, "3A":3e-4, "3B":3e-4, "3C":250, "4A":150}
         fig, ax = plt.subplots(ncols=5, nrows=10, figsize=(10, 20))
         ax = np.array(ax).flatten()
         j=0
@@ -142,11 +148,16 @@ class MRS_HCI:
         self.b_sep_lit = b_sep_lit
         self.ap_pix = interp1d(FWHM_wvl, r_in_FWHM * FWHM_miri)(self.wvl) / self.pixelsize
         
+        #####################################################
+        # CAN WE USE THE VALUES FROM THE MRS PSF?
+        print ('[WARNING]\t[Currently the MIRI PSF is used. Shift to MIRI/MRS PSF sizes?]')
+        #####################################################
+        
         self.ap_pos = polar_to_cartesian(np.zeros((2*self.size+1,2*self.size+1)), sep = b_sep_lit/self.pixelsize, ang = MRS_PA[self.band[0]]) # Y, X
         shifts = np.loadtxt(self.output_dir + f'/Image_shifts/Shift_{self.band}.txt', skiprows=1)
         self.ap_pos += shifts
         print ('[WARNING]\t[The SNR aperture is hard coded on the location if GQ Lup B]')
-        print ('Aperture position = ', self.ap_pos)
+        print ('[INFO]\t\t[Aperture position = ', self.ap_pos,']')
         
         residuals_mean = np.nanmedian(self.residuals, axis=0)
         self.vval = np.max(residuals_mean)
@@ -162,7 +173,6 @@ class MRS_HCI:
                             size = self.ap_pix[int(len(self.ap_pix)/2)],
                             ignore = True)
 
-        #print ('SNR = ', snr, ' for an aperture with radius ', self.ap_pix[int(len(self.ap_pix)/2)], ' pixels placed at ', self.ap_pos)
         print ('[RESULT]\t[SNR = %.1f in an aperture of radius %.1f pixels]'%(snr, np.mean(self.ap_pix)))
         
         fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 6))
@@ -260,8 +270,7 @@ class MRS_HCI:
         
         self.science_no_planet = np.array(self.science_no_planet)
         
-        print ('[WARNING]\t[The aperture for the spectral extraction is not at the exact position of GQ LupB]')
-        print ('[DONE]\t\t[Contrast spectrum was calculated and exported]')
+        print ('[DONE]\t\t[Contrast spectrum was calculated for an aperture of size %.1f pix and exported]'%(3*np.mean(self.ap_pix)))
 
 
 
@@ -361,7 +370,6 @@ class MRS_HCI:
         flux_err_up = psf_flux * 10**(-(self.contrast_spectrum - self.offset_mean - self.offset_std)/2.5)*1000-flux
         flux_err_down = -psf_flux * 10**(-(self.contrast_spectrum - self.offset_mean + self.offset_std)/2.5)*1000+flux
         flux_err = np.minimum(flux_err_up, flux_err_down)
-        print (np.shape(flux_err_up), np.shape(flux_err_down), np.shape(flux_err))
         
         # Export the sepctra
         pt2 = np.vstack((self.wvl, flux, flux_err))
