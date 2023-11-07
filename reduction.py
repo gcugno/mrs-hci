@@ -8,6 +8,7 @@ import pandas as pd
 import astropy.units as u
 import pickle
 from photutils import CircularAperture, aperture_photometry
+from spectres import spectres
 
 
 from util import prep_dict_cube, prep_wvl_cube, find_star, apply_PCA, crop_science, crop_refs, crop_psf, _objective, remove_outliers
@@ -44,6 +45,8 @@ class MRS_HCI_PCA:
             os.mkdir(output_dir+'/Residuals')
         if not os.path.isdir(output_dir+'/Extraction'):
             os.mkdir(output_dir+'/Extraction')
+        if not os.path.isdir(output_dir+'/SNR'):
+            os.mkdir(output_dir+'/SNR')
             
             
         self.data_import = prep_dict_cube(science_path, 'SCIENCE')[self.band]
@@ -147,13 +150,8 @@ class MRS_HCI_PCA:
                 r_in_FWHM=0.5):
         
         self.b_sep_lit = b_sep_lit
-        #self.ap_pix = interp1d(FWHM_wvl, r_in_FWHM * FWHM_miri)(self.wvl) / self.pixelsize
-        self.ap_pix = (0.033 * self.wvl + 0.106)/ self.pixelsize
+        self.ap_pix = (0.033 * self.wvl + 0.106)/ self.pixelsize * r_in_FWHM
         
-        #####################################################
-        # CAN WE USE THE VALUES FROM THE MRS PSF?
-        print ('[WARNING]\t[Currently the MIRI PSF is used. Shift to MIRI/MRS PSF sizes?]')
-        #####################################################
         
         self.ap_pos = polar_to_cartesian(np.zeros((2*self.size+1,2*self.size+1)), sep = b_sep_lit/self.pixelsize, ang = MRS_PA[self.band[0]]) # Y, X
         shifts = np.loadtxt(self.output_dir + f'/Image_shifts/Shift_{self.band}.txt', skiprows=1)
@@ -177,8 +175,12 @@ class MRS_HCI_PCA:
                             ignore = True)
 
             print ('[RESULT]\t[SNR = %.1f in an aperture of radius %.1f pixels]'%(snr, np.mean(self.ap_pix)))
+            pd_df2 = pd.DataFrame(np.array([snr]))
+            pd_df2.to_csv(self.output_dir + f'/SNR/SNR_{self.band}.txt', index=False, header=('SNR'), sep='\t')
+        
         except:
-            pass
+            pd_df2 = pd.DataFrame(np.array(['0']))
+            pd_df2.to_csv(self.output_dir + f'/SNR/SNR_{self.band}.txt', index=False, header=('SNR'), sep='\t')
         
         fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 6))
         ax.imshow(residuals_mean, origin="lower", cmap="RdBu_r", vmin=-self.vval, vmax=self.vval)
@@ -363,7 +365,8 @@ class MRS_HCI_PCA:
 
     def Extract_spectrum(self,
                         spectrum_path,
-                        outlier_thres = 5):
+                        outlier_thres = 5,
+                        bin = 50):
 
         
         self.offset_mean = np.array(self.offset_mean)
@@ -418,6 +421,18 @@ class MRS_HCI_PCA:
         pt2 = np.vstack((wvl_clean, flux_cgs, flux_err_cgs))
         pd_df2 = pd.DataFrame(pt2.T)
         pd_df2.to_csv(self.output_dir + f'/Extraction/Flux_cgs_{self.band}.txt', index=False, header=('wvl [um]', 'Flux [W m^-2 um^-1]', 'Flux err [W m^-2 um^-1]'), sep='\t')
+        
+        
+        if bin%2!=0:
+            raise ValueError('Chose an even bin number')
+        
+        wvl_bin = wvl_clean[int(bin/2)::bin][:-1]
+        
+        flux_cgs_bin, flux_err_cgs_bin = spectres(wvl_bin, wvl_clean, flux_cgs, flux_err_cgs)
+        
+        pt2 = np.vstack((wvl_bin, flux_cgs_bin, flux_err_cgs_bin))
+        pd_df2 = pd.DataFrame(pt2.T)
+        pd_df2.to_csv(self.output_dir + f'/Extraction/Flux_cgs_bin{str(bin)}_{self.band}.txt', index=False, header=('wvl [um]', 'Flux [W m^-2 um^-1]', 'Flux err [W m^-2 um^-1]'), sep='\t')
         print ('\n\n')
 
 
@@ -575,13 +590,8 @@ class MRS_HCI_simplesub:
                 r_in_FWHM=0.5):
         
         self.b_sep_lit = b_sep_lit
-        #self.ap_pix = interp1d(FWHM_wvl, r_in_FWHM * FWHM_miri)(self.wvl) / self.pixelsize
-        self.ap_pix = (0.033 * self.wvl + 0.106)/ self.pixelsize
+        self.ap_pix = (0.033 * self.wvl + 0.106)/ self.pixelsize * r_in_FWHM
         
-        #####################################################
-        # CAN WE USE THE VALUES FROM THE MRS PSF?
-        print ('[WARNING]\t[Currently the MIRI PSF is used. Shift to MIRI/MRS PSF sizes?]')
-        #####################################################
         
         self.ap_pos = polar_to_cartesian(np.zeros((2*self.size+1,2*self.size+1)), sep = b_sep_lit/self.pixelsize, ang = MRS_PA[self.band[0]]) # Y, X
         shifts = np.loadtxt(self.output_dir + f'/Image_shifts/Shift_{self.band}.txt', skiprows=1)
@@ -606,9 +616,12 @@ class MRS_HCI_simplesub:
                             ignore = True)
 
             print ('[RESULT]\t[SNR = %.1f in an aperture of radius %.1f pixels]'%(snr, np.mean(self.ap_pix)))
-        
+            pd_df2 = pd.DataFrame(np.array([snr]))
+            pd_df2.to_csv(self.output_dir + f'/SNR/SNR_{self.band}.txt', index=False, header=('SNR'), sep='\t')
+            
         except:
-            pass
+            pd_df2 = pd.DataFrame(np.array(['0']))
+            pd_df2.to_csv(self.output_dir + f'/SNR/SNR_{self.band}.txt', index=False, header=('SNR'), sep='\t')
         
         fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 6))
         ax.imshow(residuals_mean, origin="lower", cmap="RdBu_r", vmin=-self.vval, vmax=self.vval)

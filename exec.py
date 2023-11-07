@@ -7,7 +7,7 @@ size_bands = {"1A":9, "1B":9, "1C":9, "2A":9, "2B":8, "2C":8, "3A":8, "3B":8, "3
 
 
 bands = np.array(["1A","1B","1C","2A","2B","2C"])
-bands = np.array([])
+#bands = np.array([])
 
 
 for band in bands:
@@ -28,7 +28,8 @@ for band in bands:
            mask = 0.5)
 
     gqlup_red.SNR(b_sep_lit = 0.708,
-        b_pa_lit = 279)
+                    b_pa_lit = 279,
+                    r_in_FWHM=0.3)
 
     gqlup_red.Contrast_spectrum()
 
@@ -39,7 +40,7 @@ for band in bands:
 
 
 
-bands = np.array(["3C", "3B"])
+bands = np.array(["3A", "3B"])
 for band in bands:
     
     gqlup_red = MRS_HCI_simplesub(output_dir = '/Users/gcugno/Science/JWST/MRS/GQLup/Results_new/',
