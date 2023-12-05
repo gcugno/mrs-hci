@@ -3,11 +3,11 @@ import numpy as np
 
 
 thres_out = {"1A":5, "1B":5, "1C":5,"2A":5, "2B":5, "2C":8, "3A":8, "3B":8, "3C":8}
-size_bands = {"1A":9, "1B":9, "1C":9, "2A":9, "2B":8, "2C":8, "3A":8, "3B":8, "3C":8}
+size_bands = {"1A":9, "1B":9, "1C":9, "2A":8, "2B":8, "2C":8, "3A":8, "3B":8, "3C":8}
 
 
 bands = np.array(["1A","1B","1C","2A","2B","2C"])
-#bands = np.array([])
+bands = np.array(["2C"])
 
 
 for band in bands:
@@ -17,19 +17,19 @@ for band in bands:
               refs_names = ['1050_3', '1050_5', '1050_9', '1524_1', '1524_2', '1524_3', '1524_4', '1524_6', '1524_7', '1524_8', '1524_17', '1536_22', '1536_23', '1538_1', '1538_2', '1538_3','1640_10'], # ALL
               #refs_names = ['1050_3', '1050_5', '1524_1', '1524_2', '1524_3', '1524_4', '1524_6', '1524_7', '1524_8', '1524_17', '1538_1', '1640_10'],
               #refs_names = ['1050_3', '1050_9', '1524_17', '1536_22', '1536_23', '1538_1', '1538_2', '1538_3', '1640_10'], # OLD VERSION
-              psf_name = '1536_22',
+              psf_name = '1536_22',#main:1536_22    other_1538_1
               band = band)
               
 
 
     gqlup_red.prepare_cubes(size=size_bands[band])
 
-    gqlup_red.PSFsub(pca_number = 14,
+    gqlup_red.PSFsub(pca_number = 10,
            mask = 0.5)
 
-    gqlup_red.SNR(b_sep_lit = 0.708,
+    gqlup_red.SNR_fit(b_sep_lit = 0.708,
                     b_pa_lit = 279,
-                    r_in_FWHM=0.3)
+                    r_in_FWHM=0.5)
 
     gqlup_red.Contrast_spectrum()
 
@@ -40,7 +40,7 @@ for band in bands:
 
 
 
-bands = np.array(["3A", "3B"])
+bands = np.array([])
 for band in bands:
     
     gqlup_red = MRS_HCI_simplesub(output_dir = '/Users/gcugno/Science/JWST/MRS/GQLup/Results_new/',

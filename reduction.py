@@ -9,6 +9,7 @@ import astropy.units as u
 import pickle
 from photutils import CircularAperture, aperture_photometry
 from spectres import spectres
+import jwst
 
 
 from util import prep_dict_cube, prep_wvl_cube, find_star, apply_PCA, crop_science, crop_refs, crop_psf, _objective, remove_outliers
@@ -149,7 +150,7 @@ class MRS_HCI_PCA:
                 b_pa_lit,
                 r_in_FWHM=0.5):
         
-        self.b_sep_lit = b_sep_lit
+        self.b_sep = b_sep_lit
         self.ap_pix = (0.033 * self.wvl + 0.106)/ self.pixelsize * r_in_FWHM
         
         
@@ -218,8 +219,83 @@ class MRS_HCI_PCA:
             fig.savefig(self.output_dir + f'/Img/SNR_{self.band}.pdf')
         except:
             pass
+           
+           
+           
+           
+    def SNR_fit(self,
+                b_sep_lit,
+                b_pa_lit,
+                r_in_FWHM=0.5):
     
+        self.ap_pix = (0.033 * self.wvl + 0.106)/ self.pixelsize * r_in_FWHM
+        
+        residuals_mean = np.nanmedian(self.residuals, axis=0)
+        self.vval = np.max(residuals_mean)
+        offset=None
+        
+        hdul = fits.HDUList(fits.PrimaryHDU())
+        hdul.append(fits.ImageHDU(residuals_mean,header=self.data_hdr, name="RES MED"))
+        hdul.writeto(self.output_dir + f'/Residuals/Median_residuals_{self.band}.fits', overwrite=True)
+        
+        self.ap_pos = find_star(residuals_mean)
+        print ('[INFO]\t\t[Aperture from fit in band ', self.band, ' = (', int(self.ap_pos[0]*100)/100, ', ', int(self.ap_pos[1]*100)/100 ,']')
+        
+        try:
+            _, _, snr, fpf = false_alarm(image=residuals_mean,
+                            x_pos = self.ap_pos[1],
+                            y_pos = self.ap_pos[0],
+                            size = self.ap_pix[int(len(self.ap_pix)/2)],
+                            ignore = True)
 
+            print ('[RESULT]\t[SNR = %.1f in an aperture of radius %.1f pixels]'%(snr, np.mean(self.ap_pix)))
+            pd_df2 = pd.DataFrame(np.array([snr]))
+            pd_df2.to_csv(self.output_dir + f'/SNR/SNR_{self.band}.txt', index=False, header=('SNR'), sep='\t')
+        
+        except:
+            pd_df2 = pd.DataFrame(np.array(['0']))
+            pd_df2.to_csv(self.output_dir + f'/SNR/SNR_{self.band}.txt', index=False, header=('SNR'), sep='\t')
+        
+        fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 6))
+        ax.imshow(residuals_mean, origin="lower", cmap="RdBu_r", vmin=-self.vval, vmax=self.vval)
+        #ax.plot(self.ap_pos_lit[1],self.ap_pos_lit[0],'o',color='white', markersize=5)
+        ax.plot(self.ap_pos[1],self.ap_pos[0],'*',color='white', markersize=5)
+        try:
+            ax.text(14, 16, "SNR=%.1f"%snr, size=10, color="black")
+        except:
+            pass
+        ax.text(0, 1, f"Band {self.band}", size=10, color="black")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        fig.subplots_adjust(left=0.01, bottom=0.01, right=0.99, top=0.99, wspace=0.15, hspace=None)
+        fig.savefig(self.output_dir + f'/Img/Median_residuals_{self.band}.pdf')
+        
+        try:
+            snr_spectrum = []
+
+            for k in range(len(self.residuals)):
+                residuals_k = self.residuals[k]
+
+                sum_ap, noise, snr, fpf = false_alarm(residuals_k, self.ap_pos[1],self.ap_pos[0],self.ap_pix[k],ignore=True)
+                snr_spectrum.append(snr)
+
+            snr_spectrum = np.array(snr_spectrum)
+    
+            fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(9, 4))
+            ax.plot(self.wvl, snr_spectrum)
+            ax.set_xlabel("$\lambda$ [$\mu m$]", size=18)
+            ax.set_ylabel("SNR", size=18)
+            ax.tick_params(labelsize=15)
+            ax.set_ylim(0,np.max(snr_spectrum)+2)
+            ax.set_xlim(self.wvl[0]-0.01, self.wvl[-1]+0.01)
+
+            fig.subplots_adjust(left=0.08, bottom=0.16, right=0.99, top=0.99, wspace=0.15, hspace=None)
+            fig.savefig(self.output_dir + f'/Img/SNR_{self.band}.pdf')
+        except:
+            pass
+        
+        
+        
 
     def Contrast_spectrum(self):
         
@@ -233,6 +309,9 @@ class MRS_HCI_PCA:
         self.contrast_spectrum = []
         self.science_no_planet = []
         j=0
+        print (len(self.science))
+        print (len(self.residuals))
+        print (len(self.ap_pix))
         for k in tqdm(range(len(self.science))):
             selected = select_annulus(self.residuals[k], self.b_sep_from_center-3*self.ap_pix[k], self.b_sep_from_center+3*self.ap_pix[k], (self.ap_pos[0], self.ap_pos[1]), 3*self.ap_pix[k])
             var_noise = float(np.var(selected))
@@ -374,8 +453,8 @@ class MRS_HCI_PCA:
         self.contrast_spectrum = np.array(self.contrast_spectrum)
         
         psf_flux = pickle.load(open(spectrum_path, 'rb'))[self.band]
-        if self.band == "2C":
-            psf_flux = psf_flux[:1293]
+        #if self.band == "2C":
+        #    psf_flux = psf_flux[:1293]
         flux = psf_flux * 10**(-(self.contrast_spectrum-self.offset_mean)/2.5)*1000
         flux_err_up = psf_flux * 10**(-(self.contrast_spectrum - self.offset_mean - self.offset_std)/2.5)*1000-flux
         flux_err_down = -psf_flux * 10**(-(self.contrast_spectrum - self.offset_mean + self.offset_std)/2.5)*1000+flux
@@ -389,6 +468,15 @@ class MRS_HCI_PCA:
         
         # Call function that removes outliers
         wvl_clean, flux_clean, flux_err_clean = remove_outliers(self.wvl, flux, flux_err , outlier_thres)
+        
+        
+        # Add residuals RMS after continuum subtraction to the error budget
+        coeff = np.polyfit(wvl_clean, flux_clean, 1)
+        cont = np.polyval(coeff, wvl_clean)
+        
+        rms = np.sqrt(np.mean((flux_clean - cont)**2))
+        flux_err_clean = np.sqrt(flux_err_clean**2 + (flux_clean - cont)**2)
+        
         
         # Export the sepctra without outliers
         pt2 = np.vstack((wvl_clean, flux_clean, flux_err_clean))
@@ -434,15 +522,6 @@ class MRS_HCI_PCA:
         pd_df2 = pd.DataFrame(pt2.T)
         pd_df2.to_csv(self.output_dir + f'/Extraction/Flux_cgs_bin{str(bin)}_{self.band}.txt', index=False, header=('wvl [um]', 'Flux [W m^-2 um^-1]', 'Flux err [W m^-2 um^-1]'), sep='\t')
         print ('\n\n')
-
-
-
-
-
-
-
-
-
 
 
 
@@ -589,11 +668,11 @@ class MRS_HCI_simplesub:
                 b_pa_lit,
                 r_in_FWHM=0.5):
         
-        self.b_sep_lit = b_sep_lit
+        self.b_sep = b_sep_lit
         self.ap_pix = (0.033 * self.wvl + 0.106)/ self.pixelsize * r_in_FWHM
         
         
-        self.ap_pos = polar_to_cartesian(np.zeros((2*self.size+1,2*self.size+1)), sep = b_sep_lit/self.pixelsize, ang = MRS_PA[self.band[0]]) # Y, X
+        self.ap_pos = polar_to_cartesian(np.zeros((2*self.size+1,2*self.size+1)), sep = b_sep/self.pixelsize, ang = MRS_PA[self.band[0]]) # Y, X
         shifts = np.loadtxt(self.output_dir + f'/Image_shifts/Shift_{self.band}.txt', skiprows=1)
         self.ap_pos += shifts
         print ('[WARNING]\t[The SNR aperture is hard coded on the location if GQ Lup B]')
@@ -754,9 +833,13 @@ class MRS_HCI_simplesub:
         pd_df2 = pd.DataFrame(pt2.T)
         pd_df2.to_csv(self.output_dir + f'/Extraction/Flux_{self.band}.txt', index=False, header=('wvl [um]', 'Flux [mJy]', 'Flux err [mJy]'), sep='\t')
         
-        
+        # Call function that removes residual fringe
+        flux = jwst.residual_fringe.utils.fit_residual_fringes_1d(flux, self.wvl, channel=self.band[0],
+                                                          dichroic_only=False, max_amp=None)
+                                                          
         # Call function that removes outliers
         wvl_clean, flux_clean, flux_err_clean = remove_outliers(self.wvl, flux, flux_err , outlier_thres)
+        
         
         # Export the sepctra without outliers
         pt2 = np.vstack((wvl_clean, flux_clean, flux_err_clean))
