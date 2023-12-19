@@ -3,7 +3,7 @@ from setuptools import setup
 setup(
     name='mrshci',
     version='0.0.1',
-    packages=['mrshci'],
+    packages=['mrshci', 'tutorial'],
     url='https://github.com/gcugno/mrs-hci',
     license='MIT',
     author='Gabriele Cugno',
