@@ -9,9 +9,8 @@ setup(
     author='Gabriele Cugno',
     author_email='gcugno@umich.edu',
     description='Toolkit for analysis of jwst exoplanet data',
-    install_requires=["jwst >= 1.12.4",
+    install_requires=["jwst >= 1.12.5",
                       "astropy",
-                      "pynpoint",
                       "spectres",
                       "matplotlib"],
     classifiers=[

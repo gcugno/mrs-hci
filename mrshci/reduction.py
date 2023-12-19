@@ -16,9 +16,8 @@ from util import prep_dict_cube, prep_wvl_cube, find_star, apply_PCA, crop_scien
 from fixed_values import *
 
 import sys
-sys.path.append('/Users/gcugno/Tools/PynPoint')
-from pynpoint.util.image import create_mask, polar_to_cartesian, select_annulus, cartesian_to_polar
-from pynpoint.util.analysis import false_alarm, fake_planet
+from util import create_mask, polar_to_cartesian, select_annulus, cartesian_to_polar
+from util import false_alarm, fake_planet
 
 
 class MRS_HCI_PCA:

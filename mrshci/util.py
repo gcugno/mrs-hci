@@ -1,17 +1,24 @@
 import numpy as np
+import math
 import copy
 from astropy.io import fits
 from matplotlib import pyplot as plt
+from typing import Optional, Tuple, Union
 
 from scipy.ndimage import shift
 from astropy.modeling import models, fitting
 from sklearn.decomposition import PCA
 import pandas as pd
 
-import sys
-sys.path.append('/Users/gcugno/Tools/PynPoint')
-from pynpoint.util.analysis import fake_planet, merit_function
-from pynpoint.util.image import polar_to_cartesian
+from scipy.ndimage import fourier_shift, shift, rotate
+from scipy.stats import t
+from scipy.ndimage import gaussian_filter
+from skimage.feature import hessian_matrix
+
+from skimage.transform import rescale
+
+from photutils.aperture import aperture_photometry, CircularAperture
+
 
 def prep_dict_cube(folder, name):
     mrs_data = {}
@@ -27,6 +34,7 @@ def prep_dict_cube(folder, name):
     mrs_data["name"] = name
 
     return mrs_data
+
 
 def prep_wvl_cube(folder):
     mrs_wvl = {}
@@ -58,9 +66,8 @@ def prep_wvl_cube(folder):
     hdr = fits.open(folder+"Level3_ch3-long_s3d.fits")[1].header
     mrs_wvl["3C"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
     mrs_hdr["3C"] = hdr
-
-
     return mrs_wvl, mrs_hdr
+
 
 def find_star(frame):
     frame[np.isnan(frame)] = 0.
@@ -72,8 +79,7 @@ def find_star(frame):
     params = fitp(pinit, x, y, frame)
     y0, x0 = params.x_mean.value, params.y_mean.value
     return x0, y0
-    
-    
+
     
 def apply_PCA(pca_number,
              s,
@@ -289,3 +295,634 @@ def remove_outliers(wavelength, spectrum, spectrum_err, threshold=3):
     filtered_spectrum_err = filtered_spectrum_err1[z_scores_err < threshold]
 
     return filtered_wavelength, filtered_spectrum, filtered_spectrum_err
+
+
+# PYNPOINT functions
+
+def create_mask(im_shape: Tuple[int, int],
+                size: Union[Tuple[float, float],
+                            Tuple[float, None],
+                            Tuple[None, float],
+                            Tuple[None, None]]) -> np.ndarray:
+    """
+    Function to create a mask for the central and outer image regions.
+
+    Parameters
+    ----------
+    im_shape : tuple(int, int)
+        Image size in both dimensions.
+    size : tuple(float, float)
+        Size (pix) of the inner and outer mask.
+
+    Returns
+    -------
+    np.ndarray
+        Image mask.
+    """
+
+    mask = np.ones(im_shape)
+    npix = im_shape[0]
+
+    if size[0] is not None or size[1] is not None:
+
+        if npix % 2 == 0:
+            x_grid = y_grid = np.linspace(-npix / 2 + 0.5, npix / 2 - 0.5, npix)
+        else:
+            x_grid = y_grid = np.linspace(-(npix - 1) / 2, (npix - 1) / 2, npix)
+
+        xx_grid, yy_grid = np.meshgrid(x_grid, y_grid)
+        rr_grid = np.sqrt(xx_grid**2 + yy_grid**2)
+
+        if size[0] is not None:
+            mask[rr_grid < size[0]] = 0.
+
+        if size[1] is not None:
+            if size[1] > npix / 2:
+                size = (size[0], npix / 2)
+            mask[rr_grid > size[1]] = 0.
+
+    return mask
+
+
+def center_subpixel(image: np.ndarray) -> Tuple[float, float]:
+    """
+    Function to get the precise position of the image center. The center of the pixel in the
+    bottom left corner of the image is defined as (0, 0), so the bottom left corner of the
+    image is located at (-0.5, -0.5).
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Input image (2D or 3D).
+
+    Returns
+    -------
+    tuple(float, float)
+        Subpixel position (y, x) of the image center.
+    """
+
+    center_x = float(image.shape[-1]) / 2 - 0.5
+    center_y = float(image.shape[-2]) / 2 - 0.5
+
+    return center_y, center_x
+
+
+def cartesian_to_polar(center: Tuple[float, float],
+                       y_pos: float,
+                       x_pos: float) -> Tuple[float, float]:
+    """
+    Function to convert pixel coordinates to polar coordinates.
+
+    Parameters
+    ----------
+    center : tuple(float, float)
+        Image center (y, x) from :func:`~pynpoint.util.image.center_subpixel`.
+    y_pos : float
+        Pixel coordinate along the vertical axis. The bottom left corner of the image is
+        (-0.5, -0.5).
+    x_pos : float
+        Pixel coordinate along the horizontal axis. The bottom left corner of the image is
+        (-0.5, -0.5).
+
+    Returns
+    -------
+    tuple(float, float)
+        Separation (pix) and position angle (deg). The angle is measured counterclockwise with
+        respect to the positive y-axis.
+    """
+
+    sep = math.sqrt((center[1] - x_pos)**2 + (center[0] - y_pos)**2)
+    ang = math.atan2(y_pos-center[1], x_pos-center[0])
+    ang = (math.degrees(ang) - 90) % 360
+
+    return sep, ang
+
+
+def select_annulus(image_in: np.ndarray,
+                   radius_in: float,
+                   radius_out: float,
+                   mask_position: Optional[Tuple[float, float]] = None,
+                   mask_radius: Optional[float] = None) -> np.ndarray:
+    """
+    image_in : np.ndarray
+        Input image.
+    radius_in : float
+        Inner radius of the annulus (pix).
+    radius_out : float
+        Outer radius of the annulus (pix).
+    mask_position : tuple(float, float), None
+        Center (pix) position (y, x) in of the circular region that is excluded. Not used
+        if set to None.
+    mask_radius : float, None
+        Radius (pix) of the circular region that is excluded. Not used if set to None.
+    """
+
+    im_shape = image_in.shape
+
+    if im_shape[0] % 2 == 0:
+        y_grid = np.linspace(-im_shape[0] / 2 + 0.5, im_shape[0] / 2 - 0.5, im_shape[0])
+    else:
+        y_grid = np.linspace(-(im_shape[0] - 1) / 2, (im_shape[0] - 1) / 2, im_shape[0])
+
+    if im_shape[1] % 2 == 0:
+        x_grid = np.linspace(-im_shape[1] / 2 + 0.5, im_shape[1] / 2 - 0.5, im_shape[1])
+    else:
+        x_grid = np.linspace(-(im_shape[1] - 1) / 2, (im_shape[1] - 1) / 2, im_shape[1])
+
+    xx_grid, yy_grid = np.meshgrid(x_grid, y_grid)
+    rr_grid = np.sqrt(xx_grid**2 + yy_grid**2)
+
+    mask = np.ones(im_shape)
+
+    indices = np.where((rr_grid < radius_in) | (rr_grid > radius_out))
+    mask[indices[0], indices[1]] = 0.
+
+    if mask_position is not None and mask_radius is not None:
+        distance = subpixel_distance(im_shape=im_shape, position=mask_position)
+        indices = np.where(distance < mask_radius)
+        mask[indices[0], indices[1]] = 0.
+
+    indices = np.where(mask == 1.)
+
+    return image_in[indices[0], indices[1]]
+
+
+def polar_to_cartesian(image: np.ndarray,
+                       sep: float,
+                       ang: float) -> Tuple[float, float]:
+    """
+    Function to convert polar coordinates to pixel coordinates.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Input image (2D or 3D).
+    sep : float
+        Separation (pixels).
+    ang : float
+        Position angle (deg), measured counterclockwise with respect to the positive y-axis.
+
+    Returns
+    -------
+    tuple(float, float)
+        Cartesian coordinates (y, x). The bottom left corner of the image is (-0.5, -0.5).
+    """
+
+    center = center_subpixel(image)  # (y, x)
+
+    x_pos = center[1] + sep * math.cos(math.radians(ang + 90))
+    y_pos = center[0] + sep * math.sin(math.radians(ang + 90))
+
+    return y_pos, x_pos
+
+
+def pixel_distance(im_shape: Tuple[int, int],
+                   position: Optional[Tuple[int, int]] = None) -> Tuple[
+                       np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Function to calculate the distance of each pixel with respect to a given pixel position.
+    Supports both odd and even sized images.
+
+    Parameters
+    ----------
+    im_shape : tuple(int, int)
+        Image shape (y, x).
+    position : tuple(int, int)
+        Pixel center (y, x) from which the distance is calculated. The image center is used if set
+        to None. Python indexing starts at zero so the center of the bottom left pixel is (0, 0).
+
+    Returns
+    -------
+    np.ndarray
+        2D array with the distances of each pixel from the provided pixel position.
+    np.ndarray
+        2D array with the x coordinates.
+    np.ndarray
+        2D array with the y coordinates.
+    """
+
+    if im_shape[0] % 2 == 0:
+        y_grid = np.linspace(-im_shape[0] / 2 + 0.5, im_shape[0] / 2 - 0.5, im_shape[0])
+
+    else:
+        y_grid = np.linspace(-(im_shape[0] - 1) / 2, (im_shape[0] - 1) / 2, im_shape[0])
+
+    if im_shape[1] % 2 == 0:
+        x_grid = np.linspace(-im_shape[1] / 2 + 0.5, im_shape[1] / 2 - 0.5, im_shape[1])
+
+    else:
+        x_grid = np.linspace(-(im_shape[1] - 1) / 2, (im_shape[1] - 1) / 2, im_shape[1])
+
+    if position is not None:
+        y_shift = y_grid[position[0]]
+        x_shift = x_grid[position[1]]
+
+        y_grid -= y_shift
+        x_grid -= x_shift
+
+    xx_grid, yy_grid = np.meshgrid(x_grid, y_grid)
+
+    return np.sqrt(xx_grid**2 + yy_grid**2), xx_grid, yy_grid
+
+
+def subpixel_distance(im_shape: Tuple[int, int],
+                      position: Tuple[float, float],
+                      shift_center: bool = True) -> np.ndarray:
+    """
+    Function to calculate the distance of each pixel with respect to a given subpixel position.
+    Supports both odd and even sized images.
+
+    Parameters
+    ----------
+    im_shape : tuple(int, int)
+        Image shape (y, x).
+    position : tuple(float, float)
+        Pixel center (y, x) from which the distance is calculated. Python indexing starts at zero
+        so the bottom left image corner is (-0.5, -0.5).
+    shift_center : bool
+        Apply the coordinate correction for the image center.
+
+    Returns
+    -------
+    np.ndarray
+        2D array with the distances of each pixel from the provided pixel position.
+    """
+
+    # Get 2D x and y coordinates with respect to the image center
+    _, xx_grid, yy_grid = pixel_distance(im_shape, position=None)
+
+    if im_shape[0] % 2 == 0:
+        # Distance from the image center to the center of the outermost pixel
+        # Even sized images
+        y_size = im_shape[0] / 2 + 0.5
+        x_size = im_shape[1] / 2 + 0.5
+
+    else:
+        # Distance from the image center to the center of the outermost pixel
+        # Odd sized images
+        y_size = (im_shape[0] - 1) / 2
+        x_size = (im_shape[1] - 1) / 2
+
+    if shift_center:
+        # Shift the image center to the center of the bottom left pixel
+        yy_grid += y_size
+        xx_grid += x_size
+
+    # Apply a subpixel shift of the coordinate system to the requested position
+    yy_grid -= position[0]
+    xx_grid -= position[1]
+
+    return np.sqrt(xx_grid**2 + yy_grid**2)
+
+# PYNPOINT: utils.analysis.py
+
+
+def compute_aperture_flux_elements(image: np.ndarray,
+                                   x_pos: float,
+                                   y_pos: float,
+                                   size: float,
+                                   ignore: bool):
+    """
+    Computes the average fluxes inside apertures with the same separation from the center.
+    This function can be used to to estimate the residual flux of a planet at position
+    (x_pos, y_pos) and the respective noise elements with same separation (see function false_alarm)
+    It can also be used to compute the noise apertures is if no planet is present
+    (needed for contrast curves).
+
+    Parameters
+    ----------
+    image : numpy.ndarray
+        The input image as a 2D numpy array. For example, this could be a residual frame returned by
+        a :class:`.PcaPsfSubtractionModule`.
+    x_pos : float
+        The planet position (in pixels) along the horizontal axis. The pixel coordinates of the
+        bottom-left corner of the image are (-0.5, -0.5). If no planet is present x_pos and y_pos
+        determine the separation from the center.
+    y_pos : float
+        The planet position (pix) along the vertical axis. The pixel coordinates of the bottom-left
+        corner of the image are (-0.5, -0.5). If no planet is present x_pos and y_pos
+        determine the separation from the center.
+    size : float
+        The radius of the reference apertures (in pixels). Usually, this value is chosen close to
+        one half of the typical FWHM of the PSF (0.514 lambda over D for a perfect Airy pattern; in
+        practice, however, the FWHM is often larger than this).
+    ignore : bool
+        Whether or not to ignore the immediate neighboring apertures for the noise estimate. This is
+        desirable in case there are "self-subtraction wings" left and right of the planet which
+        would bias the estimation of the noise level at the separation of the planet if not ignored.
+
+    Returns
+    -------
+    ap_phot :
+        A list of aperture photometry values. If a planet was present ap_phot[0] contains the flux
+        of the planet and ap_phot[1:] contains the noise. If not planet was present ap_phot[...]
+        gives the aperture photometry of the noise elements.
+    """
+
+    # Compute the center of the current frame (with subpixel precision) and use it to compute the
+    # radius of the given position in polar coordinates (with the origin at the center of the frame)
+    center = center_subpixel(image)
+    radius = math.sqrt((center[0] - y_pos)**2 + (center[1] - x_pos)**2)
+
+    # Compute the number of apertures which we can place at the separation of  the given position
+    num_ap = int(math.pi * radius / size)
+
+    # Compute the angles at which to place the reference apertures
+    ap_theta = np.linspace(0, 2 * math.pi, num_ap, endpoint=False)
+
+    # If ignore is True, delete the apertures immediately right and left of the aperture placed on
+    # the planet signal. These apertures often contain "self-subtraction wings", which means they
+    # cannot be considered to originate from the same distribution. In accordance with section 3.2
+    # of Mawet et al. (2014), such apertures are ignored to prevent bias.
+    if ignore:
+        num_ap -= 2
+        ap_theta = np.delete(ap_theta, [1, np.size(ap_theta) - 1])
+
+    # If the number of apertures is 2 or less, we cannot compute the false positive fraction
+    if num_ap < 3:
+        raise ValueError(
+            f'Number of apertures (num_ap={num_ap}) is too small to calculate the '
+            'false positive fraction.')
+
+    # Initialize a numpy array in which we will store the integrated flux of all reference apertures
+    ap_phot = np.zeros(num_ap)
+
+    # Loop over all reference apertures and measure the integrated flux
+    for i, theta in enumerate(ap_theta):
+        # Compute the position of the current aperture in polar coordinates and convert to Cartesian
+        x_tmp = center[1] + (x_pos - center[1]) * math.cos(theta) - \
+            (y_pos - center[0]) * math.sin(theta)
+        y_tmp = center[0] + (x_pos - center[1]) * math.sin(theta) + \
+            (y_pos - center[0]) * math.cos(theta)
+
+        # Place a circular aperture at a position and sum up the flux inside the aperture
+        aperture = CircularAperture((x_tmp, y_tmp), size)
+        phot_table = aperture_photometry(image, aperture, method='exact')
+
+        ap_phot[i] = phot_table['aperture_sum']
+
+    return ap_phot
+
+
+def false_alarm(image: np.ndarray,
+                x_pos: float,
+                y_pos: float,
+                size: float,
+                ignore: bool) -> Tuple[float, float, float, float]:
+    """
+    Compute the signal-to-noise ratio (SNR), which is formally defined as the test statistic of a
+    two-sample t-test, and related quantities (such as the FPF) at a given position in an image.
+
+    For more detailed information about the definition of the signal-to-noise ratio and the
+    motivation behind it, please see the following paper:
+
+        Mawet, D. et al. (2014): "Fundamental limitations of high contrast imaging set by small
+        sample statistics". *The Astrophysical Journal*, 792(2), 97.
+        DOI: `10.1088/0004-637X/792/2/97 <https://dx.doi.org/10.1088/0004-637X/792/2/97>`_.
+
+    Parameters
+    ----------
+    image : numpy.ndarray
+        The input image as a 2D numpy array. For example, this could be a residual frame returned by
+        a :class:`.PcaPsfSubtractionModule`.
+    x_pos : float
+        The planet position (in pixels) along the horizontal axis. The pixel coordinates of the
+        bottom-left corner of the image are (-0.5, -0.5).
+    y_pos : float
+        The planet position (pix) along the vertical axis. The pixel coordinates of the bottom-left
+        corner of the image are (-0.5, -0.5).
+    size : float
+        The radius of the reference apertures (in pixels). Usually, this value is chosen close to
+        one half of the typical FWHM of the PSF (0.514 lambda over D for a perfect Airy pattern; in
+        practice, however, the FWHM is often larger than this).
+    ignore : bool
+        Whether or not to ignore the immediate neighboring apertures for the noise estimate. This is
+        desirable in case there are "self-subtraction wings" left and right of the planet which
+        would bias the estimation of the noise level at the separation of the planet if not ignored.
+
+    Returns
+    -------
+    signal_sum :
+        The integrated (summed up) flux inside the signal aperture.
+
+        Please note that this is **not** identical to the numerator of the fraction defining the SNR
+        (which is given by the `signal_sum` minus the mean of the noise apertures).
+    noise :
+        The denominator of the SNR, i.e., the standard deviation of the integrated flux of the noise
+        apertures, times a correction factor that accounts for small sample statistics.
+    snr :
+        The signal-to-noise ratio (SNR) as defined by Mawet et al. (2014) in eq. (8).
+    fpf :
+        The false positive fraction (FPF) as defined by Mawet et al. (2014) in eq. (10).
+    """
+
+    ap_phot = compute_aperture_flux_elements(image=image,
+                                             x_pos=x_pos,
+                                             y_pos=y_pos,
+                                             size=size,
+                                             ignore=ignore)
+
+    # Define shortcuts to the signal and the noise aperture sums
+    signal_aperture = ap_phot[0]
+    noise_apertures = ap_phot[1:]
+
+    # Compute the "signal", that is, the numerator of the signal-to-noise ratio: According to
+    # eq. (8) in Mawet et al. (2014), this is given by the difference between the integrated flux
+    # in the signal aperture and the mean of the integrated flux in the noise apertures
+    signal = signal_aperture - np.mean(noise_apertures)
+
+    # Compute the "noise", that is, the denominator of the signal-to-noise-ratio: According to
+    # eq. (8) in Mawet et al. (2014), this is given by the standard deviation of the integrated flux
+    # in the noise apertures times a correction factor to account for the small sample statistics.
+    # NOTE: `ddof=1` is a necessary argument for np.std() in order to compute the *unbiased*
+    #       estimate (i.e., including Bessel's corrections) of the standard deviation.
+    noise = np.std(noise_apertures, ddof=1) *\
+        math.sqrt(1 + 1 / (noise_apertures.shape[0]))
+
+    # Compute the signal-to-noise ratio by dividing the "signal" through the "noise"
+    snr = signal / noise
+
+    # Compute the false positive fraction (FPF). According to eq. (10) in Mawet et al. (2014), the
+    # FPF is given by 1 - F_nu(SNR), where F_nu is the cumulative distribution function (CDF) of a
+    # t-distribution with `nu = n-1` degrees of freedom (see Section 3 of Mawet et al. (2014) for
+    # more details on the Student's t distribution).
+    # For numerical reasons, we use the survival function (SF), which is defined precisely as 1-CDF,
+    # but may give more accurate results according to the scipy documentation.
+    fpf = t.sf(snr, df=(noise_apertures.shape[0] - 1))
+
+    return signal_aperture, noise, snr, fpf
+
+
+def shift_image(image: np.ndarray,
+                shift_yx: Union[Tuple[float, float], np.ndarray],
+                interpolation: str,
+                mode: str = 'constant') -> np.ndarray:
+    """
+    Function to shift an image.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Input image (2D or 3D). If 3D the image is not shifted along the 0th axis.
+    shift_yx : tuple(float, float), np.ndarray
+        Shift (y, x) to be applied (pix). An additional shift of zero pixels will be added
+        for the first dimension in case the input image is 3D.
+    interpolation : str
+        Interpolation type ('spline', 'bilinear', or 'fft').
+    mode : str
+        Interpolation mode.
+
+    Returns
+    -------
+    np.ndarray
+        Shifted image.
+    """
+
+    if image.ndim == 2:
+        shift_val = (shift_yx[0], shift_yx[1])
+    elif image.ndim == 3:
+        shift_val = (0, shift_yx[0], shift_yx[1])
+    else:
+        raise ValueError('Invalid number of dimensions for image: must be 2 or 3')
+
+    if interpolation == 'spline':
+        im_center = shift(image, shift_val, order=5, mode=mode)
+
+    elif interpolation == 'bilinear':
+        im_center = shift(image, shift_val, order=1, mode=mode)
+
+    elif interpolation == 'fft':
+        fft_shift = fourier_shift(np.fft.fftn(image), shift_val)
+        im_center = np.fft.ifftn(fft_shift).real
+
+    else:
+        raise ValueError('interpolation must be one of the following: spline, bilinear, fft')
+
+    return im_center
+
+
+def fake_planet(images: np.ndarray,
+                psf: np.ndarray,
+                parang: np.ndarray,
+                position: Tuple[float, float],
+                magnitude: float,
+                psf_scaling: float,
+                interpolation: str = 'spline') -> np.ndarray:
+    """
+    Function to inject artificial planets in a dataset.
+
+    Parameters
+    ----------
+    images : numpy.ndarray
+        Input images (3D).
+    psf : numpy.ndarray
+        PSF template (3D).
+    parang : numpy.ndarray
+        Parallactic angles (deg).
+    position : tuple(float, float)
+        Separation (pix) and position angle (deg) measured in counterclockwise with respect to the
+        upward direction.
+    magnitude : float
+        Magnitude difference used to scale input PSF.
+    psf_scaling : float
+        Extra factor used to scale input PSF.
+    interpolation : str
+        Interpolation type ('spline', 'bilinear', or 'fft').
+
+    Returns
+    -------
+    numpy.ndarray
+        Images with artificial planet injected.
+    """
+
+    sep = position[0]
+    ang = np.radians(position[1] + 90. - parang)
+
+    flux_ratio = 10. ** (-magnitude / 2.5)
+    psf = psf*psf_scaling*flux_ratio
+
+    x_shift = sep*np.cos(ang)
+    y_shift = sep*np.sin(ang)
+
+    im_shift = np.zeros(images.shape)
+
+    for i in range(images.shape[0]):
+        if psf.shape[0] == 1:
+            im_shift[i, ] = shift_image(psf[0, ],
+                                        (float(y_shift[i]), float(x_shift[i])),
+                                        interpolation,
+                                        mode='reflect')
+
+        else:
+            im_shift[i, ] = shift_image(psf[i, ],
+                                        (float(y_shift[i]), float(x_shift[i])),
+                                        interpolation,
+                                        mode='reflect')
+
+    return images + im_shift
+
+
+def merit_function(residuals: np.ndarray,
+                   merit: str,
+                   aperture: Tuple[int, int, float],
+                   sigma: float,
+                   var_noise: Optional[float]) -> float:
+    """
+    Function to calculate the figure of merit at a given position in the image residuals.
+
+    Parameters
+    ----------
+    residuals : numpy.ndarray
+        Residuals of the PSF subtraction (2D).
+    merit : str
+        Figure of merit for the chi-square function ('hessian', 'poisson', or 'gaussian').
+    aperture : tuple(int, int, float)
+        Position (y, x) of the aperture center (pix) and aperture radius (pix).
+    sigma : float
+        Standard deviation (pix) of the Gaussian kernel which is used to smooth the residuals
+        before the chi-square is calculated.
+    var_noise : float, None
+        Variance of the noise which is required when `merit` is set to 'gaussian' or 'hessian'.
+
+    Returns
+    -------
+    float
+        Chi-square value.
+    """
+
+    rr_grid, _, _ = pixel_distance(residuals.shape, position=(aperture[0], aperture[1]))
+
+    indices = np.where(rr_grid <= aperture[2])
+
+    if merit == 'hessian':
+
+        hessian_rr, hessian_rc, hessian_cc = hessian_matrix(image=residuals,
+                                                            sigma=sigma,
+                                                            mode='constant',
+                                                            cval=0.,
+                                                            order='rc',
+                                                            use_gaussian_derivatives=False)
+
+        hes_det = (hessian_rr*hessian_cc) - (hessian_rc*hessian_rc)
+
+        chi_square = np.sum(hes_det[indices]**2)/var_noise
+
+    elif merit == 'poisson':
+
+        if sigma > 0.:
+            residuals = gaussian_filter(input=residuals, sigma=sigma)
+
+        chi_square = np.sum(np.abs(residuals[indices]))
+
+    elif merit == 'gaussian':
+
+        chi_square = np.sum(residuals[indices]**2)/var_noise
+
+    else:
+
+        raise ValueError('Figure of merit not recognized. Please use \'hessian\', \'poisson\' '
+                         'or \'gaussian\'. Previous use of \'sum\' should now be set as '
+                         '\'poisson\'.')
+
+    return chi_square
+
