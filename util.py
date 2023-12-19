@@ -268,8 +268,24 @@ def remove_outliers(wavelength, spectrum, spectrum_err, threshold=3):
     z_scores = np.abs((spectrum - median_spectrum) / (mad * 1.4826))
 
     # Filter both wavelength and spectrum arrays based on the threshold
-    filtered_wavelength = wavelength[z_scores < threshold]
-    filtered_spectrum = spectrum[z_scores < threshold]
-    filtered_spectrum_err = spectrum_err[z_scores < threshold]
+    filtered_wavelength1 = wavelength[z_scores < threshold]
+    filtered_spectrum1 = spectrum[z_scores < threshold]
+    filtered_spectrum_err1 = spectrum_err[z_scores < threshold]
+    
+    
+    ### Repeat the same with errorbars
+    # Calculate the median of the uncertainties values
+    median_spectrum_err = np.median(filtered_spectrum_err1)
+    
+    # Calculate the Median Absolute Deviation (MAD)
+    mad_err = np.median(np.abs(filtered_spectrum_err1 - median_spectrum_err))
+    
+    # Calculate Z-scores for the spectrum values
+    z_scores_err = np.abs((filtered_spectrum_err1 - median_spectrum_err) / (mad_err * 1.4826))
+    
+    # Filter both wavelength and spectrum arrays based on the threshold
+    filtered_wavelength = filtered_wavelength1[z_scores_err < threshold]
+    filtered_spectrum = filtered_spectrum1[z_scores_err < threshold]
+    filtered_spectrum_err = filtered_spectrum_err1[z_scores_err < threshold]
 
     return filtered_wavelength, filtered_spectrum, filtered_spectrum_err

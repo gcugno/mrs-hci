@@ -66,12 +66,6 @@ class MRS_HCI_PCA:
         
         self.psf_import = prep_dict_cube(refs_path+psf_name+'/', 'PSF')[self.band]
         
-        #####################################################
-        # WHAT IS GOING ON WITH 2C AND THE DIMENSION?
-        print ('[WARNING]\t[Verify dimensions in channel 2C]')
-        #####################################################
-        
-        
         return
     
     
@@ -88,7 +82,7 @@ class MRS_HCI_PCA:
         print ('[DONE]\t\t[All the data have been cropped]')
 
             
-        #for band in self.bands:
+        # SAVE the new cubes, squared shapes
         hdul = fits.HDUList(fits.PrimaryHDU())
         hdul.append(fits.ImageHDU(self.refs_dict, name="REF"))
         hdul.writeto(self.output_dir + f'/Manipulated_images/References_{self.band}.fits', overwrite=True)
@@ -102,6 +96,7 @@ class MRS_HCI_PCA:
         hdul.writeto(self.output_dir + f'/Manipulated_images/PSF_{self.band}.fits', overwrite=True)
         print ('[DONE]\t\t[All the data saved in fits files]')
         
+        # GIVE error if cubes are not of the same shape
         if np.shape(self.science) != np.shape(self.psf) or np.shape(self.science) != np.shape(self.refs_dict)[1:]:
             print ('[ERROR]\t\t[Shape of science = ', np.shape(self.science),']')
             print ('[ERROR]\t\t[Shape of PSF = ', np.shape(self.psf),']')
@@ -113,11 +108,15 @@ class MRS_HCI_PCA:
                 pca_number,
                 mask):
         
+        # Define number of pc within class
         self.pca_number = pca_number
         
+        # Define the residuals cube as an array of zeros temporarily
+        self.residuals = np.zeros_like(self.science)
+        
+        # Mask the central region of the image
         mask_in = round(mask / (self.data_hdr["CDELT1"]*3600))
         self.mask = create_mask((2*self.size+1,2*self.size+1), (mask_in, None))
-        self.residuals = np.zeros_like(self.science)
         for k in range(len(self.science)):
             s = self.science[k]*self.mask
             r = self.refs_dict[:,k,:,:]*self.mask
@@ -125,10 +124,12 @@ class MRS_HCI_PCA:
             psf_model_k, residuals_k = apply_PCA(pca_number, s, r)
             self.residuals[k]=residuals_k
 
+        # Save residuals in fits file
         hdul = fits.HDUList(fits.PrimaryHDU())
         hdul.append(fits.ImageHDU(self.residuals,header=self.data_hdr, name="RES"))
         hdul.writeto(self.output_dir + f'/Residuals/Residuals_{self.band}.fits', overwrite=True)
             
+        # Plot the residuals every 8 channels
         fig, ax = plt.subplots(ncols=5, nrows=10, figsize=(10, 20))
         ax = np.array(ax).flatten()
         j=0
@@ -227,20 +228,26 @@ class MRS_HCI_PCA:
                 b_sep_lit,
                 b_pa_lit,
                 r_in_FWHM=0.5):
-    
+        
+        # Define aperture radius based on Law+2023
         self.ap_pix = (0.033 * self.wvl + 0.106)/ self.pixelsize * r_in_FWHM
         
+        # Take the median of the residuals cube
         residuals_mean = np.nanmedian(self.residuals, axis=0)
+        # Find the maximum of the median for plotting purposes
         self.vval = np.max(residuals_mean)
-        offset=None
+        #offset=None
         
+        # SAVE the median of the residuals
         hdul = fits.HDUList(fits.PrimaryHDU())
         hdul.append(fits.ImageHDU(residuals_mean,header=self.data_hdr, name="RES MED"))
         hdul.writeto(self.output_dir + f'/Residuals/Median_residuals_{self.band}.fits', overwrite=True)
         
+        # Find the companion position by fitting a 2D gaussian to the residuals
         self.ap_pos = find_star(residuals_mean)
-        print ('[INFO]\t\t[Aperture from fit in band ', self.band, ' = (', int(self.ap_pos[0]*100)/100, ', ', int(self.ap_pos[1]*100)/100 ,']')
+        print ('[INFO]\t\t[Aperture from fit in band ', self.band, ' = (', int(self.ap_pos[0]*100)/100, ', ', int(self.ap_pos[1]*100)/100 ,')]')
         
+        # Calculate and save in txt file the SNR of the detection
         try:
             _, _, snr, fpf = false_alarm(image=residuals_mean,
                             x_pos = self.ap_pos[1],
@@ -252,13 +259,15 @@ class MRS_HCI_PCA:
             pd_df2 = pd.DataFrame(np.array([snr]))
             pd_df2.to_csv(self.output_dir + f'/SNR/SNR_{self.band}.txt', index=False, header=('SNR'), sep='\t')
         
+        # If the SNR can not be calculated, save a 0 in the txt file
         except:
             pd_df2 = pd.DataFrame(np.array(['0']))
             pd_df2.to_csv(self.output_dir + f'/SNR/SNR_{self.band}.txt', index=False, header=('SNR'), sep='\t')
         
+        
+        # Plot the residuals including writing the calculated SNR
         fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(6, 6))
         ax.imshow(residuals_mean, origin="lower", cmap="RdBu_r", vmin=-self.vval, vmax=self.vval)
-        #ax.plot(self.ap_pos_lit[1],self.ap_pos_lit[0],'o',color='white', markersize=5)
         ax.plot(self.ap_pos[1],self.ap_pos[0],'*',color='white', markersize=5)
         try:
             ax.text(14, 16, "SNR=%.1f"%snr, size=10, color="black")
@@ -270,9 +279,11 @@ class MRS_HCI_PCA:
         fig.subplots_adjust(left=0.01, bottom=0.01, right=0.99, top=0.99, wspace=0.15, hspace=None)
         fig.savefig(self.output_dir + f'/Img/Median_residuals_{self.band}.pdf')
         
+        # Try to estimate SNR in every single channel. If it works, good, otherwise, pass
         try:
             snr_spectrum = []
-
+            
+            # Iterate over every single channel
             for k in range(len(self.residuals)):
                 residuals_k = self.residuals[k]
 
@@ -299,19 +310,18 @@ class MRS_HCI_PCA:
 
     def Contrast_spectrum(self):
         
+        # Find the polar coordinates of the companion.
         self.b_sep_from_center, b_PA_from_center = cartesian_to_polar(center = (self.size, self.size),
                                                                 y_pos = self.ap_pos[0],
                                                                 x_pos = self.ap_pos[1])
         
+        # Initiate the plot of the residuals with and without the companion
         fig, ax = plt.subplots(ncols=2, nrows=5, figsize=(5, 11))
         ax = np.array(ax).flatten()
 
         self.contrast_spectrum = []
         self.science_no_planet = []
         j=0
-        print (len(self.science))
-        print (len(self.residuals))
-        print (len(self.ap_pix))
         for k in tqdm(range(len(self.science))):
             selected = select_annulus(self.residuals[k], self.b_sep_from_center-3*self.ap_pix[k], self.b_sep_from_center+3*self.ap_pix[k], (self.ap_pos[0], self.ap_pos[1]), 3*self.ap_pix[k])
             var_noise = float(np.var(selected))
@@ -370,6 +380,7 @@ class MRS_HCI_PCA:
         
         self.offset_mean = []
         self.offset_std = []
+        self.offset_all = []
         
         #j=0
         #fig, ax = plt.subplots(ncols=3, nrows=8, figsize=(5, 15))
@@ -429,6 +440,16 @@ class MRS_HCI_PCA:
             self.offset_std.append(np.std(offsets_k))
             #fig.subplots_adjust(left=0.01, bottom=0.01, right=0.99, top=0.99, wspace=0.15, hspace=None)
             #fig.savefig(self.output_dir + f'/Img/Offsets_{self.band}.pdf')
+            self.offset_all.append(offsets_k)
+            
+        self.offset_all = np.ravel(self.offset_all)
+        
+        fig, ax = plt.subplots(figsize=(10, 12))
+        
+        ax.hist(self.offset_all, bins=50)
+        ax.set_xlim(-1.,1.)
+        fig.savefig(self.output_dir + f'/Img/Histogram_offsets_{self.band}.pdf')
+        
             
 
         #####################################################
@@ -453,12 +474,19 @@ class MRS_HCI_PCA:
         self.contrast_spectrum = np.array(self.contrast_spectrum)
         
         psf_flux = pickle.load(open(spectrum_path, 'rb'))[self.band]
+        psf_err = psf_flux/200
         #if self.band == "2C":
         #    psf_flux = psf_flux[:1293]
         flux = psf_flux * 10**(-(self.contrast_spectrum-self.offset_mean)/2.5)*1000
+        
+        flux_err_psf = psf_err * 10**(-(self.contrast_spectrum-self.offset_mean)/2.5)*1000
         flux_err_up = psf_flux * 10**(-(self.contrast_spectrum - self.offset_mean - self.offset_std)/2.5)*1000-flux
+        flux_err_up = np.sqrt(flux_err_up**2+flux_err_psf**2)
+        
         flux_err_down = -psf_flux * 10**(-(self.contrast_spectrum - self.offset_mean + self.offset_std)/2.5)*1000+flux
-        flux_err = np.minimum(flux_err_up, flux_err_down)
+        flux_err_down = np.sqrt(flux_err_down**2 + flux_err_psf**2)
+        
+        flux_err = np.maximum(flux_err_up, flux_err_down)
         
         # Export the sepctra
         pt2 = np.vstack((self.wvl, flux, flux_err))
