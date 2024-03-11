@@ -926,3 +926,8 @@ def merit_function(residuals: np.ndarray,
 
     return chi_square
 
+def pa_to_MRS_pa(pa, v3pa, band):
+    mrs_rot = {"1": 8.3, "2": 8.2, "3": 7.6, "4": 8.4}
+    north = -(v3pa + 180 + mrs_rot[band[0]]) # the 180 comes from the orientation of alpha/beta with respect to V3
+    return north + pa
+
