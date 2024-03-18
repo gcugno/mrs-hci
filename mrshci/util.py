@@ -14,6 +14,7 @@ from scipy.ndimage import fourier_shift, shift, rotate
 from scipy.stats import t
 from scipy.ndimage import gaussian_filter
 from skimage.feature import hessian_matrix
+from scipy.optimize import minimize
 
 from skimage.transform import rescale
 
@@ -28,9 +29,9 @@ def prep_dict_cube(folder, name):
     mrs_data["2A"] = fits.open(folder+"Level3_ch2-short_s3d.fits")[1].data
     mrs_data["2B"] = fits.open(folder+"Level3_ch2-medium_s3d.fits")[1].data
     mrs_data["2C"] = fits.open(folder+"Level3_ch2-long_s3d.fits")[1].data
-    mrs_data["3A"] = fits.open(folder+"Level3_ch3-short_s3d.fits")[1].data
-    mrs_data["3B"] = fits.open(folder+"Level3_ch3-medium_s3d.fits")[1].data
-    mrs_data["3C"] = fits.open(folder+"Level3_ch3-long_s3d.fits")[1].data
+    # mrs_data["3A"] = fits.open(folder+"Level3_ch3-short_s3d.fits")[1].data
+    # mrs_data["3B"] = fits.open(folder+"Level3_ch3-medium_s3d.fits")[1].data
+    # mrs_data["3C"] = fits.open(folder+"Level3_ch3-long_s3d.fits")[1].data
     mrs_data["name"] = name
 
     return mrs_data
@@ -57,15 +58,15 @@ def prep_wvl_cube(folder):
     hdr = fits.open(folder+"Level3_ch2-long_s3d.fits")[1].header
     mrs_wvl["2C"] = ((np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"])
     mrs_hdr["2C"] = hdr
-    hdr = fits.open(folder+"Level3_ch3-short_s3d.fits")[1].header
-    mrs_wvl["3A"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
-    mrs_hdr["3A"] = hdr
-    hdr = fits.open(folder+"Level3_ch3-medium_s3d.fits")[1].header
-    mrs_wvl["3B"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
-    mrs_hdr["3B"] = hdr
-    hdr = fits.open(folder+"Level3_ch3-long_s3d.fits")[1].header
-    mrs_wvl["3C"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
-    mrs_hdr["3C"] = hdr
+    # hdr = fits.open(folder+"Level3_ch3-short_s3d.fits")[1].header
+    # mrs_wvl["3A"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
+    # mrs_hdr["3A"] = hdr
+    # hdr = fits.open(folder+"Level3_ch3-medium_s3d.fits")[1].header
+    # mrs_wvl["3B"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
+    # mrs_hdr["3B"] = hdr
+    # hdr = fits.open(folder+"Level3_ch3-long_s3d.fits")[1].header
+    # mrs_wvl["3C"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
+    # mrs_hdr["3C"] = hdr
     return mrs_wvl, mrs_hdr
 
 
@@ -80,7 +81,57 @@ def find_star(frame):
     y0, x0 = params.x_mean.value, params.y_mean.value
     return x0, y0
 
-    
+def _optimise_rdi(params, d, r, mask_opt, kind):
+    if kind == "scale":
+        amp = params
+        model = amp*r
+        return np.sum((mask_opt.multiply(d - model)) ** 2)
+    elif kind == "scale+shift":
+        amp, dx, dy = params
+        model = amp*shift(r, (dx, dy), order=5)
+        return np.sum((mask_opt.multiply(d - model))**2)
+
+def apply_RDI(s,
+             rm,
+             aperture,
+             kind="scale"):
+    r = copy.copy(rm)
+    if len(r) > 1:
+        # normalise PSF
+        r = [ri/aperture_photometry(ri, aperture)['aperture_sum'] for ri in r]
+        r = np.nanmean(r, axis=0)
+    else:
+        # normalise PSF
+        r = np.array(r[0]/aperture_photometry(r[0], aperture)['aperture_sum'])
+    # data size
+    im_shape = s.shape
+    # prepare residuals
+    residuals = np.zeros_like(s)
+    # optimise
+    amp = aperture_photometry(s, aperture)['aperture_sum']/aperture_photometry(r, aperture)['aperture_sum']
+    mask_opt = aperture.to_mask()
+    if kind == "scale":
+        x0 = np.array([amp])
+    elif kind == "scale+shift":
+        x0 = np.array([amp, 0., 0.])
+    else:
+        raise ValueError("Invalid kind for optimisation")
+    opt = minimize(_optimise_rdi, x0=x0, args=(s, r, mask_opt, kind))
+    if opt.success:
+        # create psf model
+        if kind == "scale":
+            amp = opt.x[0]
+            psf_model = amp * r
+            residuals = (s - psf_model)
+            return psf_model, residuals
+        elif kind == "scale+shift":
+            amp, dx, dy = opt.x
+            psf_model = amp * shift(r, (dx, dy), order=5)
+            residuals = (s - psf_model)
+            return psf_model, residuals
+    else:
+        return None
+
 def apply_PCA(pca_number,
              s,
              rm):
@@ -927,7 +978,17 @@ def merit_function(residuals: np.ndarray,
     return chi_square
 
 def pa_to_MRS_pa(pa, v3pa, band):
-    mrs_rot = {"1": 8.3, "2": 8.2, "3": 7.6, "4": 8.4}
-    north = -(v3pa + 180 + mrs_rot[band[0]]) # the 180 comes from the orientation of alpha/beta with respect to V3
+    """
+    Transforms the position angle on Sky to position angle on the MRS FoV (counterclockwise of beta)
+    Args:
+        pa: PA in degrees with respct to North
+        v3pa: PA in degrees of JWST V3 axis during time of observation (V3PA)
+        band: MRS band (1A-4C) or (1SHORT - 4LONG)
+
+    Returns: PA in degrees with respect to MRS beta
+
+    """
+    mrs_rot = {"1": 8.3, "2": 8.2, "3": 7.6, "4": 8.4}  # from Patapis+23
+    north = -(v3pa + 180 + mrs_rot[band[0]])  # the 180 comes from the orientation of alpha/beta with respect to V3
     return north + pa
 

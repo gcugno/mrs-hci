@@ -1,11 +1,11 @@
-from mrshci.reduction import MRS_HCI_PCA, MRS_HCI_simplesub
+from mrshci.reduction import MRS_HCI_PCA
 import numpy as np
 
 thres_out = {"1A": 5, "1B": 5, "1C": 5, "2A": 5, "2B": 5, "2C": 8, "3A": 8, "3B": 8, "3C": 8}
 size_bands = {"1A": 9, "1B": 9, "1C": 9, "2A": 8, "2B": 8, "2C": 8, "3A": 8, "3B": 8, "3C": 8}
 
 bands = np.array(["1A", "1B", "1C", "2A", "2B", "2C"])
-bands = np.array(["2C"])
+bands = np.array(["1A"])
 
 for band in bands:
     gqlup_red = MRS_HCI_PCA(output_dir='/Users/gcugno/Science/JWST/MRS/GQLup/Results_new/',

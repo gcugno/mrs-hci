@@ -7,28 +7,29 @@ from tqdm import tqdm
 import pandas as pd
 import astropy.units as u
 import pickle
-from photutils import CircularAperture, aperture_photometry
+from photutils.aperture import CircularAperture, aperture_photometry
 from spectres import spectres
 import jwst
 import shutil
 import json
 
 
-from util import prep_dict_cube, prep_wvl_cube, find_star, apply_PCA, crop_science, crop_refs, crop_psf, _objective, remove_outliers
-from fixed_values import *
+from mrshci.util import prep_dict_cube, prep_wvl_cube, find_star, apply_RDI, apply_PCA, crop_science, crop_refs, crop_psf, _objective, remove_outliers
+from mrshci.fixed_values import *
 
 import sys
-from util import create_mask, polar_to_cartesian, select_annulus, cartesian_to_polar
-from util import false_alarm, fake_planet
+from mrshci.util import create_mask, polar_to_cartesian, select_annulus, cartesian_to_polar, pa_to_MRS_pa
+from mrshci.util import false_alarm, fake_planet
 
-sys.path.append('/Users/gcugno/Tools/apelfei/')
-from apelfei.contrast.preparation import create_and_save_configs, calculate_planet_positions
-from apelfei.contrast.execution import add_fake_planets, collect_all_data_setup_configs
-from apelfei.utils.aperture_photometry import AperturePhotometryMode, flux_ratio2mag
-from apelfei.utils.data_handling import save_as_fits
-from apelfei.contrast.evaluation import ContrastResults, estimate_stellar_flux
-from apelfei.statistics.parametric import TTest
-from apelfei.statistics.general import gaussian_sigma_2_fpf
+# sys.path.append('/Users/gcugno/Tools/apelfei/')
+# from applefy.contrast.preparation import create_and_save_configs, calculate_planet_positions
+# from applefy.contrast.execution import add_fake_planets, collect_all_data_setup_configs
+# from applefy.utils.aperture_photometry import AperturePhotometryMode, flux_ratio2mag
+# from applefy.utils.data_handling import save_as_fits
+# from applefy.contrast.evaluation import ContrastResults, estimate_stellar_flux
+# from applefy.statistics.parametric import TTest
+# from applefy.statistics.general import gaussian_sigma_2_fpf
+
 
 
 
@@ -41,7 +42,7 @@ class MRS_HCI_PCA:
                  refs_path,
                  refs_names,
                  psf_name,
-                 band = "1A",
+                 band="1A",
                 ):
 
         self.output_dir = output_dir
@@ -73,8 +74,8 @@ class MRS_HCI_PCA:
         
         self.pixelsize= self.data_hdr["CDELT1"]*3600
         print ('[INFO]\t\t[Pixelscale = ', self.pixelsize,']')
-        
-        
+        self.v3pa = self.data_hdr["PA_V3"]
+        print('[INFO]\t\t[V3 PA = ', self.v3pa, ']')
         self.refs_list = []
         for ref in refs_names:
             self.refs_list.append(prep_dict_cube(refs_path+ref+'/', ref)[self.band])
@@ -122,43 +123,77 @@ class MRS_HCI_PCA:
     def PSFsub(self,
                 pca_number,
                 mask):
-        
-        # Define number of pc within class
-        self.pca_number = pca_number
-        
-        # Define the residuals cube as an array of zeros temporarily
-        self.residuals = np.zeros_like(self.science)
-        
-        # Mask the central region of the image
-        mask_in = round(mask / (self.data_hdr["CDELT1"]*3600))
-        self.mask = create_mask((2*self.size+1,2*self.size+1), (mask_in, None))
-        for k in range(len(self.science)):
-            s = self.science[k]*self.mask
-            r = self.refs_dict[:,k,:,:]*self.mask
+        if pca_number is None:
+            # Define the residuals cube as an array of zeros temporarily
+            self.residuals = np.zeros_like(self.science)
 
-            psf_model_k, residuals_k = apply_PCA(pca_number, s, r)
-            self.residuals[k]=residuals_k
+            # Mask the central region of the image
+            mask_in = round(mask / (self.data_hdr["CDELT1"] * 3600))
+            self.mask = create_mask((2 * self.size + 1, 2 * self.size + 1), (mask_in, None))
+            for k in range(len(self.science)):
+                s = self.science[k] * self.mask
+                r = self.refs_dict[:, k, :, :] * self.mask
 
-        # Save residuals in fits file
-        hdul = fits.HDUList(fits.PrimaryHDU())
-        hdul.append(fits.ImageHDU(self.residuals,header=self.data_hdr, name="RES"))
-        hdul.writeto(self.output_dir + f'/Residuals/Residuals_{self.band}.fits', overwrite=True)
-            
-        # Plot the residuals every 8 channels
-        fig, ax = plt.subplots(ncols=5, nrows=10, figsize=(10, 20))
-        ax = np.array(ax).flatten()
-        j=0
+                psf_model_k, residuals_k = apply_RDI(s, r)
+                self.residuals[k] = residuals_k
 
-        for j in range(50):
-            ax[j].imshow(self.residuals[8*j],
-                             origin="lower", cmap="RdBu_r", vmin=-np.max(self.residuals[8*j]), vmax=np.max(self.residuals[8*j]))
-            ax[j].text(0, 1, "$\lambda=$%.3f"%self.wvl[8*j], size=10, color="black")
-            ax[j].set_xticks([])
-            ax[j].set_yticks([])
+            # Save residuals in fits file
+            hdul = fits.HDUList(fits.PrimaryHDU())
+            hdul.append(fits.ImageHDU(self.residuals, header=self.data_hdr, name="RES"))
+            hdul.writeto(self.output_dir + f'/Residuals/Residuals_{self.band}.fits', overwrite=True)
+
+            # Plot the residuals every 8 channels
+            fig, ax = plt.subplots(ncols=5, nrows=10, figsize=(10, 20))
+            ax = np.array(ax).flatten()
+            j = 0
+
+            for j in range(50):
+                ax[j].imshow(self.residuals[8 * j],
+                             origin="lower", cmap="RdBu_r", vmin=-np.max(self.residuals[8 * j]),
+                             vmax=np.max(self.residuals[8 * j]))
+                ax[j].text(0, 1, "$\lambda=$%.3f" % self.wvl[8 * j], size=10, color="black")
+                ax[j].set_xticks([])
+                ax[j].set_yticks([])
+
+            fig.subplots_adjust(left=0.01, bottom=0.01, right=0.99, top=0.99, wspace=0.15, hspace=None)
+            fig.savefig(self.output_dir + f'/Img/RDI_subtraction_wavelengths_{self.band}.pdf')
+        else:
+            # Define number of pc within class
+            self.pca_number = pca_number
+
+            # Define the residuals cube as an array of zeros temporarily
+            self.residuals = np.zeros_like(self.science)
+
+            # Mask the central region of the image
+            mask_in = round(mask / (self.data_hdr["CDELT1"]*3600))
+            self.mask = create_mask((2*self.size+1,2*self.size+1), (mask_in, None))
+            for k in range(len(self.science)):
+                s = self.science[k]*self.mask
+                r = self.refs_dict[:,k,:,:]*self.mask
+
+                psf_model_k, residuals_k = apply_PCA(pca_number, s, r)
+                self.residuals[k]=residuals_k
+
+            # Save residuals in fits file
+            hdul = fits.HDUList(fits.PrimaryHDU())
+            hdul.append(fits.ImageHDU(self.residuals,header=self.data_hdr, name="RES"))
+            hdul.writeto(self.output_dir + f'/Residuals/Residuals_{self.band}.fits', overwrite=True)
+
+            # Plot the residuals every 8 channels
+            fig, ax = plt.subplots(ncols=5, nrows=10, figsize=(10, 20))
+            ax = np.array(ax).flatten()
+            j=0
+
+            for j in range(50):
+                ax[j].imshow(self.residuals[8*j],
+                                 origin="lower", cmap="RdBu_r", vmin=-np.max(self.residuals[8*j]), vmax=np.max(self.residuals[8*j]))
+                ax[j].text(0, 1, "$\lambda=$%.3f"%self.wvl[8*j], size=10, color="black")
+                ax[j].set_xticks([])
+                ax[j].set_yticks([])
 
 
-        fig.subplots_adjust(left=0.01, bottom=0.01, right=0.99, top=0.99, wspace=0.15, hspace=None)
-        fig.savefig(self.output_dir + f'/Img/PCA_subtraction_wavelengths_{self.band}.pdf')
+            fig.subplots_adjust(left=0.01, bottom=0.01, right=0.99, top=0.99, wspace=0.15, hspace=None)
+            fig.savefig(self.output_dir + f'/Img/PCA_subtraction_wavelengths_{self.band}.pdf')
             
             
     def SNR(self,
@@ -168,12 +203,12 @@ class MRS_HCI_PCA:
         
         self.b_sep = b_sep_lit
         self.ap_pix = (0.033 * self.wvl + 0.106)/ self.pixelsize * r_in_FWHM
-        
+        self.b_pa_mrs = pa_to_MRS_pa(b_pa_lit, self.v3pa, self.band)
         
         self.ap_pos = polar_to_cartesian(np.zeros((2*self.size+1,2*self.size+1)), sep = b_sep_lit/self.pixelsize, ang = MRS_PA[self.band[0]]) # Y, X
         shifts = np.loadtxt(self.output_dir + f'/Image_shifts/Shift_{self.band}.txt', skiprows=1)
         self.ap_pos += shifts
-        print ('[WARNING]\t[The SNR aperture is hard coded on the location if GQ Lup B]')
+        # print ('[WARNING]\t[The SNR aperture is hard coded on the location if GQ Lup B]')
         print ('[INFO]\t\t[Aperture position = ', self.ap_pos,']')
         
         residuals_mean = np.nanmedian(self.residuals, axis=0)
