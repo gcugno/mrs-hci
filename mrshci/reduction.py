@@ -14,21 +14,21 @@ import shutil
 import json
 
 
-from mrshci.util import prep_dict_cube, prep_wvl_cube, find_star, apply_RDI, apply_PCA, crop_science, crop_refs, crop_psf, _objective, remove_outliers
-from mrshci.fixed_values import *
+from util import prep_dict_cube, prep_wvl_cube, find_star, apply_RDI, apply_PCA, crop_science, crop_refs, crop_psf, _objective, remove_outliers
+from fixed_values import *
 
 import sys
-from mrshci.util import create_mask, polar_to_cartesian, select_annulus, cartesian_to_polar, pa_to_MRS_pa
-from mrshci.util import false_alarm, fake_planet
+from util import create_mask, polar_to_cartesian, select_annulus, cartesian_to_polar, pa_to_MRS_pa
+from util import false_alarm, fake_planet
 
-# sys.path.append('/Users/gcugno/Tools/apelfei/')
-# from applefy.contrast.preparation import create_and_save_configs, calculate_planet_positions
-# from applefy.contrast.execution import add_fake_planets, collect_all_data_setup_configs
-# from applefy.utils.aperture_photometry import AperturePhotometryMode, flux_ratio2mag
-# from applefy.utils.data_handling import save_as_fits
-# from applefy.contrast.evaluation import ContrastResults, estimate_stellar_flux
-# from applefy.statistics.parametric import TTest
-# from applefy.statistics.general import gaussian_sigma_2_fpf
+sys.path.append('/Users/gcugno/Tools/applefy/')
+#from applefy.contrast.preparation import create_and_save_configs, calculate_planet_positions
+#from applefy.contrast.execution import add_fake_planets, collect_all_data_setup_configs
+#from applefy.utils.aperture_photometry import AperturePhotometryMode, flux_ratio2mag
+#from applefy.utils.data_handling import save_as_fits
+#from applefy.contrast.evaluation import ContrastResults, estimate_stellar_flux
+#from applefy.statistics.parametric import TTest
+#from applefy.statistics.general import gaussian_sigma_2_fpf
 
 
 
@@ -66,7 +66,11 @@ class MRS_HCI_PCA:
             os.mkdir(output_dir+'/Limits')
             
             
-        self.data_import = prep_dict_cube(science_path, 'SCIENCE')[self.band]
+        data_import = prep_dict_cube(science_path, 'SCIENCE')[self.band]
+        data_import = np.where(np.isnan(data_import), 0, data_import)
+        l = len(data_import)
+        self.data_import = np.zeros((l,55,55))
+        self.data_import[:,:np.shape(data_import)[1], :np.shape(data_import)[2]] = data_import
         self.wvl, self.data_hdr = prep_wvl_cube(science_path)
         self.wvl = self.wvl[self.band]
         self.data_hdr = self.data_hdr[self.band]
@@ -78,9 +82,16 @@ class MRS_HCI_PCA:
         print('[INFO]\t\t[V3 PA = ', self.v3pa, ']')
         self.refs_list = []
         for ref in refs_names:
-            self.refs_list.append(prep_dict_cube(refs_path+ref+'/', ref)[self.band])
+            ref_i = prep_dict_cube(refs_path+ref+'/', ref)[self.band]
+            ref_i = np.where(np.isnan(ref_i), 0, ref_i)
+            ref_j = np.zeros((l,55,55))
+            ref_j[:,:np.shape(ref_i)[1], :np.shape(ref_i)[2]] = ref_i
+            self.refs_list.append(ref_j)
         
-        self.psf_import = prep_dict_cube(refs_path+psf_name+'/', 'PSF')[self.band]
+        psf_import = prep_dict_cube(refs_path+psf_name+'/', 'PSF')[self.band]
+        psf_import = np.where(np.isnan(psf_import), 0, psf_import)
+        self.psf_import = np.zeros((l,55,55))
+        self.psf_import[:,:np.shape(psf_import)[1], :np.shape(psf_import)[2]] = psf_import
         
         return
     
@@ -90,6 +101,9 @@ class MRS_HCI_PCA:
                      size = 10):
         
         self.size = size
+        print (np.shape(self.data_import))
+        print (np.shape(self.psf_import))
+        print (np.shape(self.refs_list))
         
         ## CROPPING the cubes
         self.science, D0 = crop_science(self.data_import, self.data_hdr, self.band, self.output_dir, size)
@@ -770,7 +784,7 @@ class MRS_HCI_PCA:
                         
         for j in tqdm(range(len(self.science))):
     
-            im = self.science_no_planet[j]
+            im = self.science[j]#_no_planet[j]
             #sep = sep_pix #* self.ap_pix[j]
             #print ('[INFO]\t\tSeparations [pix] = ', sep)
             num_ang = 6
