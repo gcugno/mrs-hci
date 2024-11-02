@@ -301,7 +301,7 @@ def _objective(arg,
     
     # Calculate the chi-square for the tested position and contrast
     chi_sq = merit_function(residuals=res,
-                                    merit='poisson',
+                                    merit='gaussian',
                                     aperture=aperture,
                                     sigma=0,
                                     var_noise=var_noise)
