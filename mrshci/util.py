@@ -15,6 +15,7 @@ from scipy.stats import t
 from scipy.ndimage import gaussian_filter
 from skimage.feature import hessian_matrix
 from scipy.optimize import minimize
+from contextlib import suppress
 
 from skimage.transform import rescale
 
@@ -23,19 +24,32 @@ from photutils.aperture import aperture_photometry, CircularAperture
 
 def prep_dict_cube(folder, name):
     mrs_data = {}
-    mrs_data["1A"] = fits.open(folder+"Level3_ch1-short_s3d.fits")[1].data
-    mrs_data["1B"] = fits.open(folder+"Level3_ch1-medium_s3d.fits")[1].data
-    mrs_data["1C"] = fits.open(folder+"Level3_ch1-long_s3d.fits")[1].data
-    mrs_data["2A"] = fits.open(folder+"Level3_ch2-short_s3d.fits")[1].data
-    mrs_data["2B"] = fits.open(folder+"Level3_ch2-medium_s3d.fits")[1].data
-    mrs_data["2C"] = fits.open(folder+"Level3_ch2-long_s3d.fits")[1].data
-    mrs_data["3A"] = fits.open(folder+"Level3_ch3-short_s3d.fits")[1].data
-    mrs_data["3B"] = fits.open(folder+"Level3_ch3-medium_s3d.fits")[1].data
-    mrs_data["3C"] = fits.open(folder+"Level3_ch3-long_s3d.fits")[1].data
-    mrs_data["4A"] = fits.open(folder+"Level3_ch4-short_s3d.fits")[1].data
-    mrs_data["4B"] = fits.open(folder+"Level3_ch4-medium_s3d.fits")[1].data
-    mrs_data["4C"] = fits.open(folder+"Level3_ch4-long_s3d.fits")[1].data
-    mrs_data["name"] = name
+    with suppress(Exception):
+        mrs_data["1A"] = fits.open(folder+"Level3_ch1-short_s3d.fits")[1].data
+    with suppress(Exception):
+        mrs_data["1B"] = fits.open(folder+"Level3_ch1-medium_s3d.fits")[1].data
+    with suppress(Exception):
+        mrs_data["1C"] = fits.open(folder+"Level3_ch1-long_s3d.fits")[1].data
+    with suppress(Exception):
+        mrs_data["2A"] = fits.open(folder+"Level3_ch2-short_s3d.fits")[1].data
+    with suppress(Exception):
+        mrs_data["2B"] = fits.open(folder+"Level3_ch2-medium_s3d.fits")[1].data
+    with suppress(Exception):
+        mrs_data["2C"] = fits.open(folder+"Level3_ch2-long_s3d.fits")[1].data
+    with suppress(Exception):
+        mrs_data["3A"] = fits.open(folder+"Level3_ch3-short_s3d.fits")[1].data
+    with suppress(Exception):
+        mrs_data["3B"] = fits.open(folder+"Level3_ch3-medium_s3d.fits")[1].data
+    with suppress(Exception):
+        mrs_data["3C"] = fits.open(folder+"Level3_ch3-long_s3d.fits")[1].data
+    with suppress(Exception):
+        mrs_data["4A"] = fits.open(folder+"Level3_ch4-short_s3d.fits")[1].data
+    with suppress(Exception):
+        mrs_data["4B"] = fits.open(folder+"Level3_ch4-medium_s3d.fits")[1].data
+    with suppress(Exception):
+        mrs_data["4C"] = fits.open(folder+"Level3_ch4-long_s3d.fits")[1].data
+    with suppress(Exception):
+        mrs_data["name"] = name
 
     return mrs_data
 
@@ -43,42 +57,54 @@ def prep_dict_cube(folder, name):
 def prep_wvl_cube(folder):
     mrs_wvl = {}
     mrs_hdr = {}
-    hdr = fits.open(folder+"Level3_ch1-short_s3d.fits")[1].header
-    mrs_wvl["1A"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
-    mrs_hdr["1A"] = hdr
-    hdr = fits.open(folder+"Level3_ch1-medium_s3d.fits")[1].header
-    mrs_wvl["1B"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
-    mrs_hdr["1B"] = hdr
-    hdr = fits.open(folder+"Level3_ch1-long_s3d.fits")[1].header
-    mrs_wvl["1C"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
-    mrs_hdr["1C"] = hdr
-    hdr = fits.open(folder+"Level3_ch2-short_s3d.fits")[1].header
-    mrs_wvl["2A"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
-    mrs_hdr["2A"] = hdr
-    hdr = fits.open(folder+"Level3_ch2-medium_s3d.fits")[1].header
-    mrs_wvl["2B"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
-    mrs_hdr["2B"] = hdr
-    hdr = fits.open(folder+"Level3_ch2-long_s3d.fits")[1].header
-    mrs_wvl["2C"] = ((np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"])
-    mrs_hdr["2C"] = hdr
-    hdr = fits.open(folder+"Level3_ch3-short_s3d.fits")[1].header
-    mrs_wvl["3A"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
-    mrs_hdr["3A"] = hdr
-    hdr = fits.open(folder+"Level3_ch3-medium_s3d.fits")[1].header
-    mrs_wvl["3B"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
-    mrs_hdr["3B"] = hdr
-    hdr = fits.open(folder+"Level3_ch3-long_s3d.fits")[1].header
-    mrs_wvl["3C"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
-    mrs_hdr["3C"] = hdr
-    hdr = fits.open(folder+"Level3_ch4-short_s3d.fits")[1].header
-    mrs_wvl["4A"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
-    mrs_hdr["4A"] = hdr
-    hdr = fits.open(folder+"Level3_ch4-medium_s3d.fits")[1].header
-    mrs_wvl["4B"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
-    mrs_hdr["4B"] = hdr
-    hdr = fits.open(folder+"Level3_ch4-long_s3d.fits")[1].header
-    mrs_wvl["4C"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
-    mrs_hdr["4C"] = hdr
+    with suppress(Exception):
+        hdr = fits.open(folder+"Level3_ch1-short_s3d.fits")[1].header
+        mrs_wvl["1A"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
+        mrs_hdr["1A"] = hdr
+    with suppress(Exception):
+        hdr = fits.open(folder+"Level3_ch1-medium_s3d.fits")[1].header
+        mrs_wvl["1B"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
+        mrs_hdr["1B"] = hdr
+    with suppress(Exception):
+        hdr = fits.open(folder+"Level3_ch1-long_s3d.fits")[1].header
+        mrs_wvl["1C"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
+        mrs_hdr["1C"] = hdr
+    with suppress(Exception):
+        hdr = fits.open(folder+"Level3_ch2-short_s3d.fits")[1].header
+        mrs_wvl["2A"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
+        mrs_hdr["2A"] = hdr
+    with suppress(Exception):
+        hdr = fits.open(folder+"Level3_ch2-medium_s3d.fits")[1].header
+        mrs_wvl["2B"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
+        mrs_hdr["2B"] = hdr
+    with suppress(Exception):
+        hdr = fits.open(folder+"Level3_ch2-long_s3d.fits")[1].header
+        mrs_wvl["2C"] = ((np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"])
+        mrs_hdr["2C"] = hdr
+    with suppress(Exception):
+        hdr = fits.open(folder+"Level3_ch3-short_s3d.fits")[1].header
+        mrs_wvl["3A"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
+        mrs_hdr["3A"] = hdr
+    with suppress(Exception):
+        hdr = fits.open(folder+"Level3_ch3-medium_s3d.fits")[1].header
+        mrs_wvl["3B"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
+        mrs_hdr["3B"] = hdr
+    with suppress(Exception):
+        hdr = fits.open(folder+"Level3_ch3-long_s3d.fits")[1].header
+        mrs_wvl["3C"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
+        mrs_hdr["3C"] = hdr
+    with suppress(Exception):
+        hdr = fits.open(folder+"Level3_ch4-short_s3d.fits")[1].header
+        mrs_wvl["4A"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
+        mrs_hdr["4A"] = hdr
+    with suppress(Exception):
+        hdr = fits.open(folder+"Level3_ch4-medium_s3d.fits")[1].header
+        mrs_wvl["4B"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
+        mrs_hdr["4B"] = hdr
+    with suppress(Exception):
+        hdr = fits.open(folder+"Level3_ch4-long_s3d.fits")[1].header
+        mrs_wvl["4C"] = (np.arange(hdr["NAXIS3"])+hdr["CRPIX3"]-1)*hdr["CDELT3"]+hdr["CRVAL3"]
+        mrs_hdr["4C"] = hdr
     return mrs_wvl, mrs_hdr
 
 

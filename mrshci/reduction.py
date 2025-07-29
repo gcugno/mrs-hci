@@ -218,6 +218,7 @@ class MRS_HCI_PCA:
         self.b_sep = b_sep_lit
         self.ap_pix = (0.033 * self.wvl + 0.106)/ self.pixelsize * r_in_FWHM
         self.b_pa_mrs = pa_to_MRS_pa(b_pa_lit, self.v3pa, self.band)
+        print ('Adesso sono al posto giusto e ', self.b_pa_mrs)
         
         self.ap_pos = polar_to_cartesian(np.zeros((2*self.size+1,2*self.size+1)), sep = b_sep_lit/self.pixelsize, ang = MRS_PA[self.band[0]]) # Y, X
         shifts = np.loadtxt(self.output_dir + f'/Image_shifts/Shift_{self.band}.txt', skiprows=1)
@@ -417,7 +418,6 @@ class MRS_HCI_PCA:
             if k%n==0 and j<10:
                 ax[j].imshow(self.residuals[k], origin='lower', cmap='RdBu_r', vmin=-self.vval, vmax=self.vval)
                 ax[j].plot(self.ap_pos[1],self.ap_pos[0],'o',color='white', markersize=1)
-                ax[j].plot(10,10,'o',color='k', markersize=1)
                 ax[j].set_xticks([])
                 ax[j].set_yticks([])
                 ax[j].text(0, 2, '$\lambda$ = %.2f'%self.wvl[k], size=10, color="black")
@@ -430,7 +430,7 @@ class MRS_HCI_PCA:
                 j+=2
 
         fig.subplots_adjust(left=0.01, bottom=0.01, right=0.99, top=0.99, wspace=0.15, hspace=None)
-        fig.savefig(self.output_dir + f'Img/Planet_removed_{self.band}.pdf')
+        fig.savefig(self.output_dir + f'/Img/Planet_removed_{self.band}.pdf')
         
         self.science_no_planet = np.array(self.science_no_planet)
         
@@ -585,7 +585,7 @@ class MRS_HCI_PCA:
         
         fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(9, 4))
         ax.plot(self.wvl, flux, color='dodgerblue', alpha=0.8, label=f'Flux in {self.band}')
-        ax.fill_between(self.wvl, flux-flux_err, flux+flux_err, color='lightblue', alpha=0.3)
+        #ax.fill_between(self.wvl, flux-flux_err, flux+flux_err, color='lightblue', alpha=0.3)
         ax.plot(wvl_clean, flux_clean, color='k', lw=0.5)
         ax.fill_between(wvl_clean, flux_clean-flux_err_clean, flux_clean+flux_err_clean, color='silver', alpha=0.3)
 
