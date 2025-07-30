@@ -228,6 +228,8 @@ def crop_science(data, data_hdr, band, out_dir, size):
 
 def crop_refs(refs_list, refs_names, data_hdr, band, D0, out_dir, size):
     dx0,dy0 = D0
+    if round(dy0)-size<0 or round(dx0)-size<0:
+        raise ValueError("You are trying to create too large images without a clear central pixel. \n Try using different sizes!")
     refs = []
     # Loop over the references
     for i, ref in enumerate(refs_list):
@@ -247,6 +249,7 @@ def crop_refs(refs_list, refs_names, data_hdr, band, D0, out_dir, size):
         refs.append(ref_i_centered)
     # Save cropped references in a new dictionary
     refs_dict = np.array(refs)*(data_hdr["PIXAR_SR"]*1e6)
+    print (np.shape(refs_dict))
 
     # Plot the reference positions
     fig, ax = plt.subplots(ncols=6, nrows=3, figsize=(10, 6))
@@ -254,7 +257,7 @@ def crop_refs(refs_list, refs_names, data_hdr, band, D0, out_dir, size):
 
     #for i, ref in enumerate(refs_list):
     i=0
-    v = np.max(np.nanmean(refs_dict[0], axis=0))
+    v = np.nanmax(np.nanmean(refs_dict[0], axis=0))
     while i<len(refs_names):
         val = 2e-2
         im = np.nanmean(refs_dict[i], axis=0)
