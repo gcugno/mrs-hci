@@ -249,7 +249,6 @@ def crop_refs(refs_list, refs_names, data_hdr, band, D0, out_dir, size):
         refs.append(ref_i_centered)
     # Save cropped references in a new dictionary
     refs_dict = np.array(refs)*(data_hdr["PIXAR_SR"]*1e6)
-    print (np.shape(refs_dict))
 
     # Plot the reference positions
     fig, ax = plt.subplots(ncols=6, nrows=3, figsize=(10, 6))

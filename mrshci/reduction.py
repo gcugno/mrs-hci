@@ -77,7 +77,7 @@ class MRS_HCI_PCA:
         self.refs_names = refs_names
         
         self.pixelsize= self.data_hdr["CDELT1"]*3600
-        print ('[INFO]\t\t[Pixelscale = ', self.pixelsize,']')
+        print (f'[INFO]\t\t[Pixelscale = {self.pixelsize:.2f}]')
         self.v3pa = self.data_hdr["PA_V3"]
         print('[INFO]\t\t[V3 PA = ', self.v3pa, ']')
         self.refs_list = []
@@ -101,15 +101,20 @@ class MRS_HCI_PCA:
                      size = 10):
         
         self.size = size
-        print (np.shape(self.data_import))
-        print (np.shape(self.psf_import))
-        print (np.shape(self.refs_list))
         
+        self.data_import = np.pad(self.data_import, ((0,0), (15,15), (15,15)))
+        self.psf_import = np.pad(self.psf_import, ((0,0), (15,15), (15,15)))
+        self.refs_list = np.pad(self.refs_list, ((0,0), (0,0), (15,15), (15,15)))
+
+
         ## CROPPING the cubes
         self.science, D0 = crop_science(self.data_import, self.data_hdr, self.band, self.output_dir, size)
         self.refs_dict = crop_refs(self.refs_list, self.refs_names, self.data_hdr, self.band, D0, self.output_dir, size)
         self.psf = crop_psf(self.psf_import, self.data_hdr, self.band, self.output_dir, size)
         print ('[DONE]\t\t[All the data have been cropped]')
+        print ('\t\t\t Shape science = ', np.shape(self.science))
+        print ('\t\t\t Shape psf model = ', np.shape(self.psf))
+        print ('\t\t\t Shape refs = ', np.shape(self.refs_dict))
 
             
         # SAVE the new cubes, squared shapes
